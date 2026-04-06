@@ -1,0 +1,166 @@
+import asyncio
+from pathlib import Path
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+
+from database import get_db
+from config import PROJECTS_DIR
+from services.job_manager import job_manager
+from services.video_compositor import compose_video
+from services.dm_renderer import renderer
+from routers.renderer import _build_conversation_for_slide
+
+router = APIRouter(tags=["compositor"])
+
+
+@router.post("/projects/{project_id}/export")
+async def export_video(project_id: str):
+    """Start video composition. Auto-renders missing DM/meme slides. Returns job_id."""
+    job_id = await job_manager.create_job(project_id, "export")
+
+    async def do_export(progress_callback):
+        from PIL import Image, ImageOps
+
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT * FROM slides WHERE project_id=? AND is_active=1 ORDER BY sort_order",
+                (project_id,),
+            )
+            slide_rows = await cursor.fetchall()
+
+            cursor = await db.execute(
+                "SELECT * FROM render_settings WHERE project_id=?", (project_id,)
+            )
+            settings = dict(await cursor.fetchone())
+        finally:
+            await db.close()
+
+        if not slide_rows:
+            raise ValueError("No active slides to export")
+
+        rendered_dir = PROJECTS_DIR / project_id / "rendered"
+        rendered_dir.mkdir(exist_ok=True)
+
+        total = len(slide_rows)
+        slides = []
+
+        for i, r in enumerate(slide_rows):
+            await progress_callback(i / total * 0.8, f"Preparing slide {i + 1}/{total}…")
+
+            rendered_path = r["rendered_path"] if r["rendered_path"] else None
+            frame_type = r["frame_type"] if "frame_type" in r.keys() else "dm"
+
+            if rendered_path and Path(rendered_path).exists():
+                # Already rendered — use as-is
+                out_path = rendered_path
+
+            elif frame_type in ("meme", "app_ad"):
+                # Meme / app_ad slide: scale to full 1080px width, black bars top/bottom only
+                source = r["source_frame_path"] if "source_frame_path" in r.keys() else None
+                if not source or not Path(source).exists():
+                    label = "app ad image" if frame_type == "app_ad" else "meme"
+                    raise ValueError(
+                        f"Slide {r['id']} ({frame_type}) has no {label} assigned yet. "
+                        "Open the Frames step and upload your image."
+                    )
+
+                is_video_meme = Path(source).suffix.lower() in {".mp4", ".mov", ".avi", ".webm"}
+
+                if is_video_meme:
+                    out_path = source          # pass the raw video path through
+                else:
+                    # Use slide UUID so filenames never collide across re-exports
+                    out_path = str(rendered_dir / f"meme_{r['id']}.png")
+
+                    def _render_image_meme(src: str, dst: str) -> None:
+                        """
+                        Scale the meme to FULL WIDTH (1080 px), maintaining
+                        aspect ratio.  Black fills top/bottom if the image
+                        is shorter than 1920 px — but there are NEVER any
+                        side bars (left/right are always edge-to-edge).
+                        """
+                        img = Image.open(src).convert("RGB")
+                        scale  = 1080 / img.width
+                        new_h  = int(img.height * scale)
+                        img    = img.resize((1080, new_h), Image.LANCZOS)
+                        canvas = Image.new("RGB", (1080, 1920), (0, 0, 0))
+                        if new_h >= 1920:
+                            y_src = (new_h - 1920) // 2
+                            img   = img.crop((0, y_src, 1080, y_src + 1920))
+                            canvas.paste(img, (0, 0))
+                        else:
+                            canvas.paste(img, (0, (1920 - new_h) // 2))
+                        canvas.save(dst)
+
+                    await asyncio.to_thread(_render_image_meme, source, out_path)
+
+                    db2 = await get_db()
+                    try:
+                        await db2.execute(
+                            "UPDATE slides SET rendered_path=? WHERE id=?", (out_path, r["id"])
+                        )
+                        await db2.commit()
+                    finally:
+                        await db2.close()
+
+            else:
+                # DM slide: render via Playwright with per-slide jitter
+                from services.dm_renderer import _make_jitter  # noqa: PLC0415
+                conversation = await _build_conversation_for_slide(project_id, r["id"])
+                png_bytes = await renderer.render_slide(
+                    conversation,
+                    jitter=_make_jitter(conversation.theme),
+                )
+                # Use slide UUID so filenames never collide across re-exports
+                out_path = str(rendered_dir / f"slide_{r['id']}.png")
+                Path(out_path).write_bytes(png_bytes)
+
+                db2 = await get_db()
+                try:
+                    await db2.execute(
+                        "UPDATE slides SET rendered_path=? WHERE id=?", (out_path, r["id"])
+                    )
+                    await db2.commit()
+                finally:
+                    await db2.close()
+
+            slides.append({
+                "path":             out_path,
+                "hold_duration_ms": r["hold_duration_ms"],
+                "is_video":         frame_type in ("meme", "app_ad") and Path(out_path).suffix.lower() in {".mp4", ".mov", ".avi", ".webm"},
+            })
+
+        output_path = PROJECTS_DIR / project_id / "output.mp4"
+
+        async def _compose_progress(p: float, msg: str) -> None:
+            await progress_callback(0.8 + p * 0.2, msg)
+
+        await compose_video(
+            slides=slides,
+            output_path=output_path,
+            transition_type=settings["transition_type"],
+            transition_duration_ms=settings["transition_duration_ms"],
+            fps=settings["output_fps"],
+            music_path=settings.get("background_music_path"),
+            music_volume=settings["music_volume"],
+            screen_recording_effect=True,   # always on — anti TikTok fingerprinting
+            progress_callback=_compose_progress,
+        )
+
+        return str(output_path)
+
+    await job_manager.submit(job_id, do_export)
+    return {"job_id": job_id}
+
+
+@router.get("/projects/{project_id}/export/download")
+async def download_video(project_id: str):
+    output_path = PROJECTS_DIR / project_id / "output.mp4"
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Export not found. Run export first.")
+    return FileResponse(
+        path=str(output_path),
+        media_type="video/mp4",
+        filename=f"reelfactory_{project_id[:8]}.mp4",
+    )

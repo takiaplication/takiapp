@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html class="{{ theme }}" style="
+  --j-font:    {{ jitter.font_size     | default(48)   }}px;
+  --j-pad-v:   {{ jitter.bubble_pad_v | default(27)   }}px;
+  --j-pad-h:   {{ jitter.bubble_pad_h | default(36)   }}px;
+  --j-gap-s:   {{ jitter.gap_same     | default(6)    }}px;
+  --j-gap-d:   {{ jitter.gap_diff     | default(24)   }}px;
+  --j-msg-x:   {{ jitter.msg_padding_x| default(42)   }}px;
+  --j-lh:      {{ jitter.line_height  | default(1.35) }};
+  --j-bg:      {{ jitter.bg_color     | default('inherit') }};
+">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080, height=1920">
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 1080px;
+    height: 1920px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+html.dark {
+    --bg: var(--j-bg, #000000);
+    --sender-bg: #3797F0;
+    --sender-text: #FFFFFF;
+    --receiver-bg: #262626;
+    --receiver-text: #FFFFFF;
+    --secondary-text: #8E8E8E;
+    --reaction-bg: #363636;
+    --reaction-border: #000000;
+}
+
+html.light {
+    --bg: var(--j-bg, #FFFFFF);
+    --sender-bg: #3797F0;
+    --sender-text: #FFFFFF;
+    --receiver-bg: #EFEFEF;
+    --receiver-text: #000000;
+    --secondary-text: #8E8E8E;
+    --reaction-bg: #E0E0E0;
+    --reaction-border: #FFFFFF;
+}
+
+body {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+}
+
+/* ===== MESSAGE AREA — fills full canvas, vertically centered ===== */
+.messages {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 60px var(--j-msg-x, 42px) 80px;
+    overflow: hidden;
+    gap: 0;
+}
+
+/* ===== TIMESTAMP DIVIDER ===== */
+.timestamp-divider {
+    text-align: center;
+    font-size: 33px;
+    color: var(--secondary-text);
+    padding: 30px 0 18px;
+}
+
+/* ===== MESSAGE ROW ===== */
+.message-row {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+.message-row.sender {
+    align-items: flex-end;
+}
+
+.message-row.receiver {
+    align-items: flex-start;
+}
+
+/* Spacing */
+.message-row + .message-row.same-sender { margin-top: var(--j-gap-s, 6px); }
+.message-row + .message-row:not(.same-sender) { margin-top: var(--j-gap-d, 24px); }
+.timestamp-divider + .message-row { margin-top: 0; }
+
+/* ===== STORY REPLY BLOCK ===== */
+.story-reply-label {
+    font-size: 30px;
+    color: var(--secondary-text);
+    margin-bottom: 12px;
+    padding: 0 6px;
+}
+
+.story-thumbnail {
+    width: 390px;
+    height: 520px;
+    border-radius: 24px;
+    object-fit: cover;
+    display: block;
+    margin-bottom: 10px;
+}
+
+.story-thumbnail-placeholder {
+    width: 390px;
+    height: 520px;
+    border-radius: 24px;
+    background: #1a1a1a;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ===== BUBBLES ===== */
+.bubble {
+    max-width: 75%;
+    padding: var(--j-pad-v, 27px) var(--j-pad-h, 36px);
+    font-size: var(--j-font, 48px);
+    line-height: var(--j-lh, 1.35);
+    word-wrap: break-word;
+    white-space: pre-wrap;
+}
+
+.bubble.sender {
+    background: var(--sender-bg);
+    color: var(--sender-text);
+}
+
+.bubble.receiver {
+    background: var(--receiver-bg);
+    color: var(--receiver-text);
+}
+
+/* Border radius by position */
+.bubble.sender.solo   { border-radius: 66px 66px 12px 66px; }
+.bubble.receiver.solo { border-radius: 66px 66px 66px 12px; }
+.bubble.sender.first  { border-radius: 66px 66px 12px 66px; }
+.bubble.receiver.first{ border-radius: 66px 66px 66px 12px; }
+.bubble.sender.middle { border-radius: 66px 12px 12px 66px; }
+.bubble.receiver.middle{border-radius: 12px 66px 66px 12px; }
+.bubble.sender.last   { border-radius: 66px 12px 66px 66px; }
+.bubble.receiver.last { border-radius: 12px 66px 66px 66px; }
+
+/* Story reply bubbles always solo shape */
+.bubble.after-story.sender   { border-radius: 66px 66px 12px 66px; }
+.bubble.after-story.receiver { border-radius: 66px 66px 66px 12px; }
+
+/* ===== EMOJI REACTIONS ===== */
+.reaction {
+    font-size: 33px;
+    background: var(--reaction-bg);
+    border: 3px solid var(--reaction-border);
+    border-radius: 30px;
+    padding: 3px 12px;
+    margin-top: 6px;
+    align-self: flex-end;
+}
+
+.message-row.receiver .reaction {
+    align-self: flex-start;
+}
+
+/* ===== READ RECEIPT ===== */
+.read-receipt {
+    font-size: 30px;
+    color: var(--secondary-text);
+    padding: 6px 6px 0;
+    text-align: right;
+}
+
+.message-row.receiver .read-receipt {
+    text-align: left;
+}
+
+/* ===== TYPING INDICATOR ===== */
+.typing-row {
+    display: flex;
+    align-items: center;
+    margin-top: 24px;
+}
+
+.typing-bubble {
+    background: var(--receiver-bg);
+    border-radius: 66px;
+    padding: 27px 42px;
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.typing-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--secondary-text);
+}
+</style>
+</head>
+<body>
+
+<div class="messages">
+    {% for msg in processed_messages %}
+
+        {% if msg.show_timestamp and msg.timestamp_text %}
+        <div class="timestamp-divider">{{ msg.timestamp_text }}</div>
+        {% endif %}
+
+        <div class="message-row {{ 'sender' if msg.is_sender else 'receiver' }} {{ 'same-sender' if msg.same_as_prev else '' }}">
+
+            {% if msg.story_image_base64 or msg.story_reply_label %}
+                {# Story reply block: label + thumbnail + bubble below #}
+                {% if msg.story_reply_label %}
+                <div class="story-reply-label">{{ msg.story_reply_label }}</div>
+                {% endif %}
+
+                {% if msg.story_image_base64 %}
+                <img class="story-thumbnail" src="data:image/jpeg;base64,{{ msg.story_image_base64 }}" />
+                {% else %}
+                <div class="story-thumbnail-placeholder"></div>
+                {% endif %}
+
+                {% if msg.text %}
+                <div class="bubble {{ 'sender' if msg.is_sender else 'receiver' }} after-story">{{ msg.text }}</div>
+                {% endif %}
+
+            {% else %}
+                {# Normal message bubble #}
+                <div class="bubble {{ 'sender' if msg.is_sender else 'receiver' }} {{ msg.position }}">{{ msg.text }}</div>
+            {% endif %}
+
+            {% if msg.emoji_reaction %}
+            <div class="reaction">{{ msg.emoji_reaction }}</div>
+            {% endif %}
+
+        </div>
+
+        {% if msg.read_receipt %}
+        <div class="read-receipt">{{ msg.read_receipt }}</div>
+        {% endif %}
+
+    {% endfor %}
+
+    {% if show_typing %}
+    <div class="typing-row">
+        <div class="typing-bubble">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+</body>
+</html>
