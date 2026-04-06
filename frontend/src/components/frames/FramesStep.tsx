@@ -15,9 +15,6 @@ export default function FramesStep({ onNext, onBack }: Props) {
   const { currentProject, loadProject } = useProjectStore()
   const [frames, setFrames] = useState<api.FrameSlide[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const [videoDuration, setVideoDuration] = useState(0)
-  const [scrubTime, setScrubTime] = useState(0)
-  const [capturing, setCapturing] = useState(false)
   const [librarySlideId, setLibrarySlideId] = useState<string | null>(null)   // which meme slot is open
   const extractJob = useJobProgress()
   const didLoadRef = useRef(false)
@@ -31,7 +28,6 @@ export default function FramesStep({ onNext, onBack }: Props) {
   useEffect(() => {
     if (!currentProject) return
     reload()
-    api.getVideoDuration(currentProject.id).then((d) => setVideoDuration(d))
   }, [currentProject])
 
   useEffect(() => {
@@ -65,16 +61,6 @@ export default function FramesStep({ onNext, onBack }: Props) {
   const handleReExtract = async () => {
     const jobId = await api.extractFrames(currentProject.id)
     extractJob.start(jobId)
-  }
-
-  const handleCapture = async () => {
-    setCapturing(true)
-    try {
-      const slide = await api.captureFrame(currentProject.id, scrubTime)
-      setFrames((f) => [...f, slide])
-    } finally {
-      setCapturing(false)
-    }
   }
 
   const handleMemeAssigned = (slideId: string, frameUrl: string, holdMs: number) => {
@@ -143,38 +129,12 @@ export default function FramesStep({ onNext, onBack }: Props) {
         </div>
       )}
 
-      {/* Manual capture bar */}
-      {videoDuration > 0 && (
-        <div className="px-6 py-2.5 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0 flex items-center gap-3">
-          <span className="text-xs text-zinc-400 whitespace-nowrap">Manual capture</span>
-          <input
-            type="range"
-            min={0}
-            max={videoDuration}
-            step={0.1}
-            value={scrubTime}
-            onChange={(e) => setScrubTime(parseFloat(e.target.value))}
-            className="flex-1 accent-purple-500"
-          />
-          <span className="text-xs text-zinc-400 w-14 text-right">
-            {Math.floor(scrubTime / 60)}:{String(Math.floor(scrubTime % 60)).padStart(2, '0')}
-          </span>
-          <button
-            onClick={handleCapture}
-            disabled={capturing}
-            className="bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded transition-colors whitespace-nowrap"
-          >
-            {capturing ? 'Capturing…' : '+ Capture'}
-          </button>
-        </div>
-      )}
-
       <div className="flex-1 overflow-hidden flex">
         {/* Grid */}
         <div className="flex-1 overflow-y-auto p-4">
           {frames.length === 0 ? (
             <div className="flex items-center justify-center h-full text-zinc-500 text-sm">
-              No frames yet — click Re-extract or use Manual capture
+              No frames yet — click Re-extract to start
             </div>
           ) : (
             <div className="grid grid-cols-4 gap-3">

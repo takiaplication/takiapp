@@ -17,11 +17,12 @@ import { CSS } from '@dnd-kit/utilities'
 
 const API_BASE = 'http://localhost:8000'
 
-function SortableSlide({ id, index, isActive, isMeme, frameUrl, onClick, onDelete }: {
+function SortableSlide({ id, index, isActive, isMeme, isAppAd, frameUrl, onClick, onDelete }: {
   id: string
   index: number
   isActive: boolean
   isMeme: boolean
+  isAppAd: boolean
   frameUrl: string | null
   onClick: () => void
   onDelete: () => void
@@ -52,13 +53,17 @@ function SortableSlide({ id, index, isActive, isMeme, frameUrl, onClick, onDelet
       onClick={onClick}
       className={`group w-16 h-28 rounded-lg flex-shrink-0 flex flex-col items-center justify-center text-xs font-mono cursor-pointer transition-all overflow-hidden relative ${
         isActive
-          ? isMeme
-            ? 'border-2 border-amber-400 ring-1 ring-amber-400/40'
-            : 'border-2 border-blue-500 ring-1 ring-blue-500/40'
-          : isMeme
-            ? 'border border-amber-700/60 hover:border-amber-500'
-            : 'border border-zinc-700 hover:border-zinc-500'
-      } ${isMeme ? 'bg-zinc-900' : 'bg-zinc-800'}`}
+          ? isAppAd
+            ? 'border-2 border-green-400 ring-1 ring-green-400/40'
+            : isMeme
+              ? 'border-2 border-amber-400 ring-1 ring-amber-400/40'
+              : 'border-2 border-blue-500 ring-1 ring-blue-500/40'
+          : isAppAd
+            ? 'border border-green-700/60 hover:border-green-500'
+            : isMeme
+              ? 'border border-amber-700/60 hover:border-amber-500'
+              : 'border border-zinc-700 hover:border-zinc-500'
+      } ${isAppAd ? 'bg-zinc-900' : isMeme ? 'bg-zinc-900' : 'bg-zinc-800'}`}
     >
       {/* Meme thumbnail */}
       {isMeme && frameUrl && !isVideo && (
@@ -94,19 +99,28 @@ function SortableSlide({ id, index, isActive, isMeme, frameUrl, onClick, onDelet
       <div className="relative z-10 flex flex-col items-center gap-0.5">
         {/* Type badge */}
         <span className={`text-[8px] font-bold px-1 py-0.5 rounded ${
-          isMeme ? 'bg-amber-500/80 text-black' : 'bg-blue-600/70 text-white'
+          isAppAd
+            ? 'bg-green-600/80 text-white'
+            : isMeme
+              ? 'bg-amber-500/80 text-black'
+              : 'bg-blue-600/70 text-white'
         }`}>
-          {isMeme ? 'MEME' : 'DM'}
+          {isAppAd ? 'APP AD' : isMeme ? 'MEME' : 'DM'}
         </span>
         {/* Slide number */}
         <span className={`font-bold ${
-          isMeme
-            ? (isActive ? 'text-amber-300' : 'text-amber-600')
-            : (isActive ? 'text-blue-300' : 'text-zinc-400')
+          isAppAd
+            ? (isActive ? 'text-green-300' : 'text-green-600')
+            : isMeme
+              ? (isActive ? 'text-amber-300' : 'text-amber-600')
+              : (isActive ? 'text-blue-300' : 'text-zinc-400')
         }`}>
           {index + 1}
         </span>
-        {/* Empty meme indicator */}
+        {/* Empty slot indicator */}
+        {isAppAd && !frameUrl && (
+          <span className="text-green-700 text-[10px]">📱 add</span>
+        )}
         {isMeme && !frameUrl && (
           <span className="text-amber-700 text-[10px]">✚ meme</span>
         )}
@@ -156,6 +170,7 @@ export default function Storyboard() {
                 index={i}
                 isActive={slide.id === activeSlideId}
                 isMeme={slide.frame_type === 'meme'}
+                isAppAd={slide.frame_type === 'app_ad'}
                 frameUrl={slide.frame_url ?? null}
                 onClick={() => selectSlide(slide.id)}
                 onDelete={() => handleDelete(slide.id)}

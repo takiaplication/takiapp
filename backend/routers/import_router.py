@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from config import STORAGE_DIR, PROJECTS_DIR
 from database import get_db
 from services.downloader import download_video
-from services.frame_extractor import extract_scenes, capture_frame_at, get_video_duration
+from services.frame_extractor import extract_scenes
 from services.frame_classifier import classify_frame_ai
 from services.ocr_service import (
     ocr_frame, classify_sender, filter_message_blocks,
@@ -38,10 +38,6 @@ class ImportUrlRequest(BaseModel):
 
 class ExtractFramesRequest(BaseModel):
     pass  # threshold is fixed internally; every second of the video is inspected
-
-
-class CaptureFrameRequest(BaseModel):
-    time_seconds: float
 
 
 class OcrRequest(BaseModel):
@@ -84,26 +80,6 @@ async def import_url(project_id: str, body: ImportUrlRequest):
 
     await job_manager.submit(job_id, _download)
     return {"job_id": job_id}
-
-
-# ---------------------------------------------------------------------------
-# Video info (duration for manual capture scrubber)
-# ---------------------------------------------------------------------------
-
-@router.get("/projects/{project_id}/import/video-info")
-async def video_info(project_id: str):
-    db = await get_db()
-    try:
-        row = await (await db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,))).fetchone()
-    finally:
-        await db.close()
-
-    vp = row["video_path"] if row and "video_path" in row.keys() else None
-    if not vp or not Path(vp).exists():
-        return {"duration": 0.0}
-
-    duration = await __import__("asyncio").to_thread(get_video_duration, vp)
-    return {"duration": duration}
 
 
 # ---------------------------------------------------------------------------
@@ -240,11 +216,14 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
 
         await progress_callback(0.95, f"Stage 3 done — {len(classified)} frames classified")
 
-        # ── STAGE 3b: collapse consecutive meme runs ──────────────────────────
-        # app_ad and dm frames are always kept; consecutive meme frames are
-        # collapsed to one representative (the first in each run).
+        # ── STAGE 3b: collapse consecutive meme runs + deduplicate app_ad ───────
+        # - Consecutive meme frames → keep only the first of each run.
+        # - app_ad → keep only the very first occurrence across the whole video;
+        #   all later app_ad frames are dropped (there is always exactly one
+        #   app_ad slide per project).
         collapsed: list[tuple[str, str]] = []
         in_meme_run = False
+        app_ad_seen = False
 
         for fp, ftype in classified:
             if ftype == "meme":
@@ -252,8 +231,14 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
                     collapsed.append((fp, "meme"))   # first of a meme run → keep
                     in_meme_run = True
                 # subsequent memes in same run → skip
+            elif ftype == "app_ad":
+                in_meme_run = False
+                if not app_ad_seen:
+                    collapsed.append((fp, "app_ad"))  # first app_ad → keep
+                    app_ad_seen = True
+                # any later app_ad → drop (guarantee exactly one)
             else:
-                # dm or app_ad — always keep, always breaks any meme run
+                # dm — always keep, always breaks any meme run
                 in_meme_run = False
                 collapsed.append((fp, ftype))
 
@@ -298,56 +283,6 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
 
     await job_manager.submit(job_id, _extract)
     return {"job_id": job_id}
-
-
-# ---------------------------------------------------------------------------
-# Manual frame capture
-# ---------------------------------------------------------------------------
-
-@router.post("/projects/{project_id}/import/capture-frame")
-async def manual_capture(project_id: str, body: CaptureFrameRequest):
-    """Grab a single frame at a given timestamp and append it as a new slide."""
-    db = await get_db()
-    try:
-        row = await (await db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,))).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Project not found")
-        video_path = row["video_path"] if "video_path" in row.keys() else None
-    finally:
-        await db.close()
-
-    if not video_path or not Path(video_path).exists():
-        raise HTTPException(status_code=400, detail="No video downloaded for this project yet")
-
-    frame_path = await capture_frame_at(video_path, project_id, body.time_seconds)
-    ftype = await classify_frame_ai(frame_path)
-
-    db2 = await get_db()
-    try:
-        max_order_row = await (await db2.execute(
-            "SELECT MAX(sort_order) as mo FROM slides WHERE project_id=?", (project_id,)
-        )).fetchone()
-        next_order = (max_order_row["mo"] or 0) + 1
-        slide_id = str(uuid.uuid4())
-        # Meme captures: clear source_frame_path too
-        src = None if ftype == "meme" else frame_path
-        await db2.execute(
-            """INSERT INTO slides
-               (id, project_id, sort_order, slide_type, source_frame_path,
-                frame_type, is_active, hold_duration_ms)
-               VALUES (?, ?, ?, 'dm', ?, ?, 1, 3000)""",
-            (slide_id, project_id, next_order, src, ftype),
-        )
-        await db2.commit()
-    finally:
-        await db2.close()
-
-    return {
-        "id": slide_id,
-        "frame_url": _to_url_path(src),
-        "frame_type": ftype,
-        "sort_order": next_order,
-    }
 
 
 # ---------------------------------------------------------------------------

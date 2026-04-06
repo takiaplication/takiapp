@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useProjectStore } from '../../store/projectStore'
-import { uploadStoryImage } from '../../api/projects'
+import { uploadStoryImage, uploadMemeToSlide } from '../../api/projects'
 import type { Message } from '../../types/project'
 import MemeLibraryModal from '../frames/MemeLibraryModal'
 
@@ -89,6 +89,93 @@ function MemeSlidePanel({ slideId, projectId }: { slideId: string; projectId: st
   )
 }
 
+// ─── App Ad slide panel ──────────────────────────────────────────────────────
+
+function AppAdSlidePanel({ slideId, projectId }: { slideId: string; projectId: string }) {
+  const { slides, updateSlideMeme } = useProjectStore()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  const slide = slides.find((s) => s.id === slideId)
+  const hasImage = !!slide?.frame_url
+
+  const handleUpload = async (file: File) => {
+    setUploading(true)
+    try {
+      const result = await uploadMemeToSlide(projectId, slideId, file)
+      updateSlideMeme(slideId, result.frame_url, slide?.hold_duration_ms ?? 1000)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <span className="bg-green-600/20 text-green-400 text-xs font-bold px-2 py-0.5 rounded border border-green-600/30">
+          📱 APP AD
+        </span>
+        <span className="text-zinc-500 text-xs">
+          {hasImage ? 'Afbeelding toegevoegd' : 'Nog geen afbeelding'}
+        </span>
+      </div>
+
+      {/* Preview */}
+      <div
+        className="w-full aspect-[9/16] bg-black rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center max-h-64 cursor-pointer relative group"
+        onClick={() => fileInputRef.current?.click()}
+      >
+        {hasImage ? (
+          <>
+            <img
+              src={`http://localhost:8000${slide?.frame_url}`}
+              alt="App Ad"
+              className="w-full h-full object-contain"
+            />
+            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 pointer-events-none">
+              <span className="text-2xl">🔄</span>
+              <span className="text-white text-xs font-medium">Vervangen</span>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center gap-3 text-zinc-600">
+            <span className="text-5xl">📱</span>
+            <p className="text-sm text-center px-4 text-zinc-500">
+              Klik om jouw app-afbeelding<br />te uploaden
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Upload button */}
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        className="w-full bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white font-semibold text-sm py-2.5 rounded transition-colors"
+      >
+        {uploading ? '⏳ Uploading…' : hasImage ? '🔄 Andere afbeelding' : '📤 Afbeelding uploaden'}
+      </button>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleUpload(file)
+          e.target.value = ''
+        }}
+      />
+
+      <p className="text-zinc-600 text-xs text-center">
+        Wordt 1 seconde getoond in de video
+      </p>
+    </div>
+  )
+}
+
 // ─── DM message editor ───────────────────────────────────────────────────────
 
 export default function DMEditor() {
@@ -103,10 +190,13 @@ export default function DMEditor() {
     )
   }
 
-  // Route meme slides to the meme panel
+  // Route to the correct panel based on frame_type
   const activeSlide = slides.find((s) => s.id === activeSlideId)
   if (activeSlide?.frame_type === 'meme') {
     return <MemeSlidePanel slideId={activeSlideId} projectId={currentProject.id} />
+  }
+  if (activeSlide?.frame_type === 'app_ad') {
+    return <AppAdSlidePanel slideId={activeSlideId} projectId={currentProject.id} />
   }
 
   // ── DM slide editor ──────────────────────────────────────────────────────

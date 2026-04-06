@@ -17,8 +17,11 @@ frontend/dist/
 
 # Storage / runtime data
 backend/storage/
+storage/
 *.db
 *.sqlite
+*.db-shm
+*.db-wal
 
 # Env files
 .env

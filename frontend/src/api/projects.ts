@@ -118,18 +118,8 @@ export async function extractFrames(projectId: string): Promise<string> {
   return res.data.job_id
 }
 
-export async function captureFrame(projectId: string, timeSeconds: number): Promise<FrameSlide> {
-  const res = await api.post(`/projects/${projectId}/import/capture-frame`, { time_seconds: timeSeconds })
-  return res.data
-}
-
 export async function setFrameType(projectId: string, slideId: string, frameType: string): Promise<void> {
   await api.patch(`/projects/${projectId}/slides/${slideId}/frame-type`, { frame_type: frameType })
-}
-
-export async function getVideoDuration(projectId: string): Promise<number> {
-  const res = await api.get(`/projects/${projectId}/import/video-info`)
-  return res.data.duration ?? 0
 }
 
 export async function uploadMemeToSlide(
