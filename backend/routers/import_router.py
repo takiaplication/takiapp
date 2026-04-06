@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from config import STORAGE_DIR, PROJECTS_DIR
 from database import get_db
 from services.downloader import download_video
-from services.frame_extractor import extract_scenes
+from services.frame_extractor import extract_scenes, SAMPLE_MS
 from services.frame_classifier import classify_frame_ai
 from services.ocr_service import (
     ocr_frame, classify_sender, filter_message_blocks,
@@ -217,67 +217,150 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
         await progress_callback(0.95, f"Stage 3 done — {len(classified)} frames classified")
 
         # ── STAGE 3b: collapse consecutive meme runs + deduplicate app_ad ───────
-        # - Consecutive meme frames → keep only the first of each run.
-        # - app_ad → keep only the very first occurrence across the whole video;
-        #   all later app_ad frames are dropped (there is always exactly one
-        #   app_ad slide per project).
+        # - Track ALL frames of each meme run so we can cut the exact video segment.
+        # - Consecutive meme frames → keep the first as representative.
+        # - app_ad → keep only the very first occurrence.
         collapsed: list[tuple[str, str]] = []
-        in_meme_run = False
-        app_ad_seen = False
+        in_meme_run       = False
+        current_meme_run: list[str] = []
+        app_ad_seen       = False
+        meme_frame_groups: dict[str, list[str]] = {}   # rep_frame → all frames
 
         for fp, ftype in classified:
             if ftype == "meme":
                 if not in_meme_run:
-                    collapsed.append((fp, "meme"))   # first of a meme run → keep
                     in_meme_run = True
-                # subsequent memes in same run → skip
-            elif ftype == "app_ad":
-                in_meme_run = False
-                if not app_ad_seen:
-                    collapsed.append((fp, "app_ad"))  # first app_ad → keep
-                    app_ad_seen = True
-                # any later app_ad → drop (guarantee exactly one)
+                    current_meme_run = [fp]
+                else:
+                    current_meme_run.append(fp)
             else:
-                # dm — always keep, always breaks any meme run
-                in_meme_run = False
-                collapsed.append((fp, ftype))
+                if in_meme_run:
+                    rep = current_meme_run[0]
+                    collapsed.append((rep, "meme"))
+                    meme_frame_groups[rep] = current_meme_run[:]
+                    current_meme_run = []
+                    in_meme_run = False
+                if ftype == "app_ad":
+                    if not app_ad_seen:
+                        collapsed.append((fp, "app_ad"))
+                        app_ad_seen = True
+                else:
+                    collapsed.append((fp, ftype))
 
-        meme_slots  = sum(1 for _, t in collapsed if t == "meme")
+        # Flush any meme run at the very end of the video
+        if in_meme_run and current_meme_run:
+            rep = current_meme_run[0]
+            collapsed.append((rep, "meme"))
+            meme_frame_groups[rep] = current_meme_run[:]
+
+        meme_slots   = sum(1 for _, t in collapsed if t == "meme")
         app_ad_slots = sum(1 for _, t in collapsed if t == "app_ad")
-        dm_unique   = sum(1 for _, t in collapsed if t == "dm")
+        dm_unique    = sum(1 for _, t in collapsed if t == "dm")
         await progress_callback(
             0.96,
             f"Collapsed → {dm_unique} DM + {meme_slots} meme + {app_ad_slots} app_ad = {len(collapsed)} total",
         )
 
-        # ── STAGE 4 (96–100 %): single fast DB write ─────────────────────────
+        # ── STAGE 3c (96–99 %): extract meme video segments ──────────────────
+        # For each meme run, cut the segment from the original video using
+        # ffmpeg -c copy (no re-encode, near-instant).
+        # Conservative trim: drop 1 frame from each end to avoid
+        # transition blur / fade / opacity artefacts.
+        import re         as _re
+        import subprocess as _sp
+
+        _SAMPLE_S  = SAMPLE_MS / 1000.0        # 0.25 s per frame
+        _TRIM_S    = 1 * _SAMPLE_S              # 0.25 s trimmed from each end
+        _MIN_DUR_S = 0.5                        # skip trim if result is shorter
+
+        def _frame_ts_s(fp: str) -> float:
+            """Timestamp of a frame_auto_NNNNNN file in seconds."""
+            m = _re.search(r'frame_auto_(\d+)', fp)
+            return int(m.group(1)) * _SAMPLE_S if m else 0.0
+
+        def _ffmpeg_clip(src: str, dst: str, start: float, end: float) -> bool:
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", f"{start:.3f}",
+                "-to", f"{end:.3f}",
+                "-i", src,
+                "-c", "copy",
+                dst,
+            ]
+            r = _sp.run(cmd, capture_output=True, timeout=120)
+            return (r.returncode == 0
+                    and Path(dst).exists()
+                    and Path(dst).stat().st_size > 0)
+
+        clips_dir = PROJECTS_DIR / project_id / "meme_clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        meme_clip_paths: dict[str, Optional[str]] = {}   # rep_frame → clip path
+
+        meme_idx = 0
+        for fp, ftype in collapsed:
+            if ftype != "meme":
+                continue
+            frames_in_run = meme_frame_groups.get(fp, [fp])
+            ts_start = _frame_ts_s(frames_in_run[0])
+            ts_end   = _frame_ts_s(frames_in_run[-1]) + _SAMPLE_S
+
+            seg_start = ts_start + _TRIM_S
+            seg_end   = ts_end   - _TRIM_S
+            if seg_end - seg_start < _MIN_DUR_S:
+                seg_start, seg_end = ts_start, ts_end   # keep full segment
+
+            clip_path = str(clips_dir / f"meme_seg_{meme_idx:03d}.mp4")
+            ok = await _aio.to_thread(_ffmpeg_clip, video_path, clip_path, seg_start, seg_end)
+            meme_clip_paths[fp] = clip_path if ok else None
+            meme_idx += 1
+            await progress_callback(
+                0.96 + 0.03 * meme_idx / max(meme_slots, 1),
+                f"Extracting meme clip {meme_idx}/{meme_slots} "
+                f"({seg_end - seg_start:.1f}s)",
+            )
+
+        await progress_callback(0.99, f"Stage 3c done — {meme_idx} meme clips extracted")
+
+        # ── STAGE 4 (99–100 %): single fast DB write ─────────────────────────
         db2 = await get_db()
         try:
             await db2.execute("DELETE FROM slides WHERE project_id=?", (project_id,))
             for i, (frame_path, ftype) in enumerate(collapsed):
+                extracted_clip = None
                 if ftype == "meme":
-                    src = None
-                    default_hold = 1500
+                    extracted_clip = meme_clip_paths.get(frame_path)
+                    if extracted_clip and Path(extracted_clip).exists():
+                        src = extracted_clip   # use extracted clip as default source
+                        cap    = _cv2.VideoCapture(extracted_clip)
+                        _fps   = cap.get(_cv2.CAP_PROP_FPS) or 30
+                        _fr    = cap.get(_cv2.CAP_PROP_FRAME_COUNT)
+                        cap.release()
+                        default_hold = max(500, int(_fr / _fps * 1000))
+                    else:
+                        src            = None
+                        extracted_clip = None
+                        default_hold   = 1500
                 elif ftype == "app_ad":
-                    src = None          # user uploads their own promotional image
-                    default_hold = 1000  # 1 second in the final video
+                    src          = None
+                    default_hold = 1000
                 else:
-                    src = frame_path
+                    src          = frame_path
                     default_hold = 3000
                 await db2.execute(
                     """INSERT INTO slides
                        (id, project_id, sort_order, slide_type, source_frame_path,
-                        frame_type, is_active, hold_duration_ms)
-                       VALUES (?, ?, ?, 'dm', ?, ?, 1, ?)""",
-                    (str(uuid.uuid4()), project_id, i, src, ftype, default_hold),
+                        frame_type, is_active, hold_duration_ms, extracted_clip_path)
+                       VALUES (?, ?, ?, 'dm', ?, ?, 1, ?, ?)""",
+                    (str(uuid.uuid4()), project_id, i, src, ftype,
+                     default_hold, extracted_clip),
                 )
             await db2.commit()
         finally:
             await db2.close()
 
         return {
-            "raw_frames": len(raw_frames),
-            "unique_frames": len(unique_frames),
+            "raw_frames":        len(raw_frames),
+            "unique_frames":     len(unique_frames),
             "duplicates_removed": dup_count,
         }
 

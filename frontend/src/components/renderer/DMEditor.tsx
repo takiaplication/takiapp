@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useProjectStore } from '../../store/projectStore'
-import { uploadStoryImage, uploadMemeToSlide } from '../../api/projects'
+import { uploadStoryImage, uploadMemeToSlide, useOriginalClip, saveClipToLibrary } from '../../api/projects'
 import type { Message } from '../../types/project'
 import MemeLibraryModal from '../frames/MemeLibraryModal'
 
@@ -8,73 +8,212 @@ const API_BASE = 'http://localhost:8000'
 
 // ─── Meme slide panel ────────────────────────────────────────────────────────
 
+type MemeTab = 'original' | 'custom'
+
 function MemeSlidePanel({ slideId, projectId }: { slideId: string; projectId: string }) {
   const { slides, updateSlideMeme } = useProjectStore()
-  const [showLibrary, setShowLibrary] = useState(false)
+  const [showLibrary, setShowLibrary]   = useState(false)
+  const [activeTab, setActiveTab]       = useState<MemeTab>('original')
+  const [loadingOriginal, setLoadingOriginal] = useState(false)
+  const [savingToLib, setSavingToLib]   = useState(false)
+  const [savedToLib, setSavedToLib]     = useState(false)
 
-  const slide = slides.find((s) => s.id === slideId)
-  const hasAssigned = !!slide?.frame_url
-  const isVideo = slide?.frame_url?.endsWith('.mp4') || slide?.frame_url?.endsWith('.mov')
+  const slide             = slides.find((s) => s.id === slideId)
+  const hasExtracted      = !!slide?.extracted_clip_url
+  const hasAssigned       = !!slide?.frame_url
+  const isAssignedVideo   = slide?.frame_url?.match(/\.(mp4|mov|webm)$/i)
 
   const handleAssigned = (frameUrl: string, holdMs: number) => {
     updateSlideMeme(slideId, frameUrl, holdMs)
     setShowLibrary(false)
   }
 
+  const handleUseOriginal = async () => {
+    if (!slide?.extracted_clip_url) return
+    setLoadingOriginal(true)
+    try {
+      const result = await useOriginalClip(projectId, slideId)
+      updateSlideMeme(slideId, result.frame_url, result.hold_duration_ms)
+    } finally {
+      setLoadingOriginal(false)
+    }
+  }
+
+  const handleSaveToLibrary = async () => {
+    setSavingToLib(true)
+    try {
+      await saveClipToLibrary(projectId, slideId)
+      setSavedToLib(true)
+    } finally {
+      setSavingToLib(false)
+    }
+  }
+
   return (
     <div className="p-4 space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between">
         <span className="bg-amber-500/20 text-amber-400 text-xs font-bold px-2 py-0.5 rounded border border-amber-500/30">
           🎭 MEME SLIDE
         </span>
-        <span className="text-zinc-500 text-xs">
-          {hasAssigned
-            ? (isVideo ? 'Video meme — duur = videolengte' : 'Afbeelding meme — 1,5 sec')
-            : 'Nog geen meme toegevoegd'}
-        </span>
-      </div>
-
-      {/* Preview */}
-      <div className="w-full aspect-[9/16] bg-black rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center max-h-64">
-        {!hasAssigned ? (
-          <div className="flex flex-col items-center gap-3 text-zinc-600">
-            <span className="text-5xl">🎭</span>
-            <p className="text-sm text-center px-4">
-              Kies een meme uit de bibliotheek
-            </p>
-          </div>
-        ) : isVideo ? (
-          <div className="flex flex-col items-center gap-2 text-zinc-400">
-            <span className="text-4xl">▶️</span>
-            <span className="text-xs text-center px-4 truncate max-w-full">
-              {slide?.frame_url?.split('/').pop()}
-            </span>
-          </div>
-        ) : (
-          <img
-            src={`${API_BASE}${slide?.frame_url}`}
-            alt="Assigned meme"
-            className="w-full h-full object-contain"
-          />
+        {hasExtracted && (
+          <button
+            onClick={handleSaveToLibrary}
+            disabled={savingToLib || savedToLib}
+            className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors text-zinc-300"
+            title="Clip opslaan in de gedeelde meme-bibliotheek"
+          >
+            {savedToLib ? '✅ Opgeslagen' : savingToLib ? '⏳ Opslaan…' : '📥 Sla op in bibliotheek'}
+          </button>
         )}
       </div>
 
-      {/* Action button */}
-      <button
-        onClick={() => setShowLibrary(true)}
-        className="w-full bg-amber-600 hover:bg-amber-500 text-black font-semibold text-sm py-2.5 rounded transition-colors"
-      >
-        {hasAssigned ? '🔄 Andere meme kiezen' : '➕ Meme toevoegen uit bibliotheek'}
-      </button>
+      {/* Tabs — only show if an extracted clip exists */}
+      {hasExtracted && (
+        <div className="flex rounded-lg overflow-hidden border border-zinc-700 text-sm">
+          <button
+            onClick={() => setActiveTab('original')}
+            className={`flex-1 py-1.5 font-medium transition-colors ${
+              activeTab === 'original'
+                ? 'bg-amber-600/30 text-amber-300'
+                : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            🎬 Originele meme
+          </button>
+          <button
+            onClick={() => setActiveTab('custom')}
+            className={`flex-1 py-1.5 font-medium transition-colors ${
+              activeTab === 'custom'
+                ? 'bg-zinc-700 text-white'
+                : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            🗂️ Eigen meme
+          </button>
+        </div>
+      )}
 
-      {/* Duration info */}
-      {hasAssigned && (
-        <p className="text-zinc-600 text-xs text-center">
-          {isVideo
-            ? 'De video speelt volledig af in de export'
-            : 'Afbeelding wordt 1,5 seconden getoond'}
-        </p>
+      {/* ── Tab: Original extracted clip ── */}
+      {(!hasExtracted || activeTab === 'original') && hasExtracted && (
+        <div className="space-y-3">
+          {/* Video preview */}
+          <div className="w-full aspect-[9/16] bg-black rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center max-h-64">
+            <video
+              key={slide?.extracted_clip_url}
+              src={`${API_BASE}${slide?.extracted_clip_url}`}
+              controls
+              muted
+              loop
+              className="w-full h-full object-contain"
+            />
+          </div>
+
+          <button
+            onClick={handleUseOriginal}
+            disabled={loadingOriginal}
+            className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-black font-semibold text-sm py-2.5 rounded transition-colors"
+          >
+            {loadingOriginal ? '⏳ Laden…' : '✅ Gebruik originele meme'}
+          </button>
+
+          <p className="text-zinc-600 text-xs text-center">
+            Auto-uitgeknipte clip uit het bronvideo
+          </p>
+        </div>
+      )}
+
+      {/* ── Tab: Custom / library ── */}
+      {(!hasExtracted || activeTab === 'custom') && (
+        <div className="space-y-3">
+          {/* Preview of currently assigned meme */}
+          <div className="w-full aspect-[9/16] bg-black rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center max-h-64">
+            {!hasAssigned ? (
+              <div className="flex flex-col items-center gap-3 text-zinc-600">
+                <span className="text-5xl">🎭</span>
+                <p className="text-sm text-center px-4">
+                  Kies een meme uit de bibliotheek
+                </p>
+              </div>
+            ) : isAssignedVideo ? (
+              <video
+                key={slide?.frame_url}
+                src={`${API_BASE}${slide?.frame_url}`}
+                controls
+                muted
+                loop
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <img
+                src={`${API_BASE}${slide?.frame_url}`}
+                alt="Assigned meme"
+                className="w-full h-full object-contain"
+              />
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowLibrary(true)}
+            className="w-full bg-amber-600 hover:bg-amber-500 text-black font-semibold text-sm py-2.5 rounded transition-colors"
+          >
+            {hasAssigned ? '🔄 Andere meme kiezen' : '➕ Meme toevoegen uit bibliotheek'}
+          </button>
+
+          {hasAssigned && (
+            <p className="text-zinc-600 text-xs text-center">
+              {isAssignedVideo
+                ? 'De video speelt volledig af in de export'
+                : 'Afbeelding wordt 1,5 seconden getoond'}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* No extracted clip — show only library picker (original look) */}
+      {!hasExtracted && (
+        <div className="space-y-3">
+          <div className="w-full aspect-[9/16] bg-black rounded-lg overflow-hidden border border-zinc-800 flex items-center justify-center max-h-64">
+            {!hasAssigned ? (
+              <div className="flex flex-col items-center gap-3 text-zinc-600">
+                <span className="text-5xl">🎭</span>
+                <p className="text-sm text-center px-4">
+                  Kies een meme uit de bibliotheek
+                </p>
+              </div>
+            ) : isAssignedVideo ? (
+              <video
+                key={slide?.frame_url}
+                src={`${API_BASE}${slide?.frame_url}`}
+                controls
+                muted
+                loop
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <img
+                src={`${API_BASE}${slide?.frame_url}`}
+                alt="Assigned meme"
+                className="w-full h-full object-contain"
+              />
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowLibrary(true)}
+            className="w-full bg-amber-600 hover:bg-amber-500 text-black font-semibold text-sm py-2.5 rounded transition-colors"
+          >
+            {hasAssigned ? '🔄 Andere meme kiezen' : '➕ Meme toevoegen uit bibliotheek'}
+          </button>
+
+          {hasAssigned && (
+            <p className="text-zinc-600 text-xs text-center">
+              {isAssignedVideo
+                ? 'De video speelt volledig af in de export'
+                : 'Afbeelding wordt 1,5 seconden getoond'}
+            </p>
+          )}
+        </div>
       )}
 
       {showLibrary && (

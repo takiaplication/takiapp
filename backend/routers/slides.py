@@ -29,9 +29,10 @@ def _to_frame_url(source_frame_path: Optional[str]) -> Optional[str]:
 
 def _row_to_response(r) -> dict:
     d = dict(r)
-    d["is_active"]  = bool(d.get("is_active", 0))
-    d["frame_type"] = d.get("frame_type") or "dm"
-    d["frame_url"]  = _to_frame_url(d.get("source_frame_path"))
+    d["is_active"]          = bool(d.get("is_active", 0))
+    d["frame_type"]         = d.get("frame_type") or "dm"
+    d["frame_url"]          = _to_frame_url(d.get("source_frame_path"))
+    d["extracted_clip_url"] = _to_frame_url(d.get("extracted_clip_path"))
     return d
 
 
@@ -131,3 +132,40 @@ async def delete_slide(project_id: str, slide_id: str):
     finally:
         await db.close()
     return {"ok": True}
+
+
+@router.post("/projects/{project_id}/slides/{slide_id}/use-original-clip")
+async def use_original_clip(project_id: str, slide_id: str):
+    """Restore the auto-extracted meme clip as the active source for this slide."""
+    import cv2 as _cv2
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT extracted_clip_path FROM slides WHERE id=? AND project_id=?",
+            (slide_id, project_id),
+        )).fetchone()
+        if not row or not row["extracted_clip_path"]:
+            raise HTTPException(status_code=404, detail="No extracted clip for this slide")
+        clip_path = row["extracted_clip_path"]
+        if not Path(clip_path).exists():
+            raise HTTPException(status_code=404, detail="Extracted clip file not found on disk")
+
+        # Compute actual clip duration
+        cap    = _cv2.VideoCapture(clip_path)
+        fps    = cap.get(_cv2.CAP_PROP_FPS) or 30
+        frames = cap.get(_cv2.CAP_PROP_FRAME_COUNT)
+        cap.release()
+        hold_ms = max(500, int(frames / fps * 1000))
+
+        await db.execute(
+            "UPDATE slides SET source_frame_path=?, hold_duration_ms=?, rendered_path=NULL WHERE id=? AND project_id=?",
+            (clip_path, hold_ms, slide_id, project_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    return {
+        "frame_url":       _to_frame_url(clip_path),
+        "hold_duration_ms": hold_ms,
+    }

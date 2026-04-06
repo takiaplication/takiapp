@@ -6,10 +6,15 @@ Endpoints:
   POST /api/meme-library/upload       upload a new meme to the library
   POST /api/projects/{id}/slides/{sid}/assign-library-meme
                                       assign a library meme to a meme slot
+  POST /api/projects/{id}/slides/{sid}/save-clip-to-library
+                                      save auto-extracted clip to shared library
 """
 
+import json
 import uuid
+import shutil
 import cv2
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
@@ -124,4 +129,63 @@ async def assign_library_meme(
         "frame_url":         f"/meme-library/{meme_path.name}",
         "hold_duration_ms":  hold_ms,
         "meme_type":         "video" if is_video else "image",
+    }
+
+
+# ── Save extracted clip to library ────────────────────────────────────────────
+
+@router.post("/projects/{project_id}/slides/{slide_id}/save-clip-to-library")
+async def save_clip_to_library(project_id: str, slide_id: str):
+    """
+    Copy the auto-extracted meme clip for this slide into the shared meme
+    library and write a JSON sidecar with provenance metadata.
+
+    Returns the new LibraryMeme object so the frontend can add it to the list.
+    """
+    db = await get_db()
+    try:
+        # fetch slide + project in one query
+        row = await db.execute_fetchall(
+            """SELECT s.extracted_clip_path, p.name AS project_name, p.source_url
+               FROM slides s
+               JOIN projects p ON p.id = s.project_id
+               WHERE s.id = ? AND s.project_id = ?""",
+            (slide_id, project_id),
+        )
+    finally:
+        await db.close()
+
+    if not row:
+        raise HTTPException(404, "Slide not found")
+
+    r = row[0]
+    clip_path = r["extracted_clip_path"] if hasattr(r, "__getitem__") else r[0]
+    project_name = r["project_name"] if hasattr(r, "__getitem__") else r[1]
+    source_url   = r["source_url"]    if hasattr(r, "__getitem__") else r[2]
+
+    if not clip_path or not Path(clip_path).exists():
+        raise HTTPException(404, "No extracted clip available for this slide")
+
+    src = Path(clip_path)
+
+    # Build a unique destination filename inside MEME_LIBRARY_DIR
+    stem = f"meme_{uuid.uuid4().hex[:8]}{src.suffix}"
+    dest = MEME_LIBRARY_DIR / stem
+    shutil.copy2(src, dest)
+
+    # Write JSON sidecar with provenance
+    meta = {
+        "source_url":   source_url or "",
+        "project_id":   project_id,
+        "project_name": project_name or "",
+        "slide_id":     slide_id,
+        "date_added":   datetime.now(timezone.utc).isoformat(),
+    }
+    dest.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+    return {
+        "filename": dest.name,
+        "name":     dest.stem,
+        "url":      f"/meme-library/{dest.name}",
+        "type":     _media_type(dest),
     }

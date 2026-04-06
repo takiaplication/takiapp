@@ -11,8 +11,9 @@ export interface Slide {
   project_id: string
   sort_order: number
   slide_type: 'dm' | 'meme'
-  frame_type: string           // 'dm' | 'meme'
-  frame_url: string | null     // preview URL for the assigned meme / source frame
+  frame_type: string            // 'dm' | 'meme' | 'app_ad'
+  frame_url: string | null      // preview URL for the assigned meme / source frame
+  extracted_clip_url: string | null  // URL of the auto-extracted meme clip (immutable)
   rendered_path: string | null
   is_active: boolean
   hold_duration_ms: number

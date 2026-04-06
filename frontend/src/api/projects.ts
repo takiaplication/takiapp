@@ -181,6 +181,26 @@ export async function assignLibraryMeme(
   return res.data
 }
 
+export async function useOriginalClip(
+  projectId: string,
+  slideId: string,
+): Promise<{ frame_url: string; hold_duration_ms: number }> {
+  const res = await api.post(
+    `/projects/${projectId}/slides/${slideId}/use-original-clip`,
+  )
+  return res.data
+}
+
+export async function saveClipToLibrary(
+  projectId: string,
+  slideId: string,
+): Promise<LibraryMeme> {
+  const res = await api.post(
+    `/projects/${projectId}/slides/${slideId}/save-clip-to-library`,
+  )
+  return res.data
+}
+
 // --- Global app settings ---
 
 export interface AppSettings {

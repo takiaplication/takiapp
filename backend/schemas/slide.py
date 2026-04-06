@@ -28,8 +28,9 @@ class SlideResponse(BaseModel):
     project_id: str
     sort_order: int
     slide_type: str
-    frame_type: str = "dm"           # "dm" | "meme"
-    frame_url: Optional[str] = None  # preview URL for meme assignment or source frame
+    frame_type: str = "dm"                    # "dm" | "meme" | "app_ad"
+    frame_url: Optional[str] = None           # URL of the currently active source
+    extracted_clip_url: Optional[str] = None  # URL of the auto-extracted meme clip
     rendered_path: Optional[str] = None
     is_active: bool
     hold_duration_ms: int

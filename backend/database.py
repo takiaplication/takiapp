@@ -95,6 +95,7 @@ async def init_db():
             ("messages", "story_reply_label", "TEXT"),
             ("slides", "source_frame_path", "TEXT"),
             ("slides", "frame_type", "TEXT DEFAULT 'dm'"),
+            ("slides", "extracted_clip_path", "TEXT"),
             ("projects", "source_url", "TEXT"),
             ("projects", "video_path", "TEXT"),
         ]
