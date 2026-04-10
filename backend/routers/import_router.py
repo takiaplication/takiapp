@@ -178,7 +178,7 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
         meme_categories: dict[int, str] = {}
 
         for rank, idx in enumerate(meme_indices):
-            is_first = (rank == 0)
+            is_first = (idx == 0)                                                  # only opening when it IS the very first slide
             is_last  = (rank == len(meme_indices) - 1) and len(meme_indices) > 1
             fp       = collapsed[idx][0]
             cat      = await classify_meme_category_ai(fp, is_first=is_first, is_last=is_last)
