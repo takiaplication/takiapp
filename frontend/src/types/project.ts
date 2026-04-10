@@ -17,6 +17,7 @@ export interface Slide {
   rendered_path: string | null
   is_active: boolean
   hold_duration_ms: number
+  meme_category: string | null  // 'opening' | 'sport' | 'coocked' | 'cooking' | 'shoot_our_shot' | 'succes'
 }
 
 export interface Message {

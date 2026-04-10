@@ -1,10 +1,11 @@
 import asyncio
+import random
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from database import get_db
-from config import PROJECTS_DIR
+from config import PROJECTS_DIR, MEME_LIBRARY_DIR
 from services.job_manager import job_manager
 from services.video_compositor import compose_video
 from services.dm_renderer import renderer
@@ -55,46 +56,84 @@ async def export_video(project_id: str):
                 # Already rendered — use as-is
                 out_path = rendered_path
 
-            elif frame_type in ("meme", "app_ad"):
-                # Meme / app_ad slide: scale to full 1080px width, black bars top/bottom only
+            elif frame_type == "meme":
+                # ── Meme slide: pick a random file from the library category ──
+                cat     = r["meme_category"] if "meme_category" in r.keys() and r["meme_category"] else "cooking"
+                cat_dir = MEME_LIBRARY_DIR / cat
+                _video_exts = {".mp4", ".mov", ".avi", ".webm"}
+                _img_exts   = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+                _all_exts   = _video_exts | _img_exts
+                candidates  = [
+                    f for f in cat_dir.iterdir()
+                    if f.is_file() and f.suffix.lower() in _all_exts
+                ] if cat_dir.exists() else []
+                if not candidates:
+                    raise ValueError(
+                        f"Meme library folder '{cat}' is empty or missing. "
+                        f"Add files to {cat_dir}"
+                    )
+                source = str(random.choice(candidates))
+
+                def _render_image_meme(src: str, dst: str) -> None:
+                    """Scale to full 1080 px width; black bars top/bottom only."""
+                    img = Image.open(src).convert("RGB")
+                    scale  = 1080 / img.width
+                    new_h  = int(img.height * scale)
+                    img    = img.resize((1080, new_h), Image.LANCZOS)
+                    canvas = Image.new("RGB", (1080, 1920), (0, 0, 0))
+                    if new_h >= 1920:
+                        y_src = (new_h - 1920) // 2
+                        img   = img.crop((0, y_src, 1080, y_src + 1920))
+                        canvas.paste(img, (0, 0))
+                    else:
+                        canvas.paste(img, (0, (1920 - new_h) // 2))
+                    canvas.save(dst)
+
+                is_video_meme = Path(source).suffix.lower() in _video_exts
+                if is_video_meme:
+                    out_path = source          # pass raw video through; composer reads duration
+                else:
+                    out_path = str(rendered_dir / f"meme_{r['id']}.png")
+                    await asyncio.to_thread(_render_image_meme, source, out_path)
+                    db2 = await get_db()
+                    try:
+                        await db2.execute(
+                            "UPDATE slides SET rendered_path=? WHERE id=?", (out_path, r["id"])
+                        )
+                        await db2.commit()
+                    finally:
+                        await db2.close()
+
+            elif frame_type == "app_ad":
+                # ── App-ad slide: use the captured source frame directly ──
                 source = r["source_frame_path"] if "source_frame_path" in r.keys() else None
                 if not source or not Path(source).exists():
-                    label = "app ad image" if frame_type == "app_ad" else "meme"
                     raise ValueError(
-                        f"Slide {r['id']} ({frame_type}) has no {label} assigned yet. "
+                        f"Slide {r['id']} (app_ad) has no source frame. "
                         "Open the Frames step and upload your image."
                     )
 
+                def _render_image_meme(src: str, dst: str) -> None:  # noqa: F811
+                    """Scale to full 1080 px width; black bars top/bottom only."""
+                    img = Image.open(src).convert("RGB")
+                    scale  = 1080 / img.width
+                    new_h  = int(img.height * scale)
+                    img    = img.resize((1080, new_h), Image.LANCZOS)
+                    canvas = Image.new("RGB", (1080, 1920), (0, 0, 0))
+                    if new_h >= 1920:
+                        y_src = (new_h - 1920) // 2
+                        img   = img.crop((0, y_src, 1080, y_src + 1920))
+                        canvas.paste(img, (0, 0))
+                    else:
+                        canvas.paste(img, (0, (1920 - new_h) // 2))
+                    canvas.save(dst)
+
                 is_video_meme = Path(source).suffix.lower() in {".mp4", ".mov", ".avi", ".webm"}
-
                 if is_video_meme:
-                    out_path = source          # pass the raw video path through
+                    out_path = source
                 else:
-                    # Use slide UUID so filenames never collide across re-exports
-                    out_path = str(rendered_dir / f"meme_{r['id']}.png")
-
-                    def _render_image_meme(src: str, dst: str) -> None:
-                        """
-                        Scale the meme to FULL WIDTH (1080 px), maintaining
-                        aspect ratio.  Black fills top/bottom if the image
-                        is shorter than 1920 px — but there are NEVER any
-                        side bars (left/right are always edge-to-edge).
-                        """
-                        img = Image.open(src).convert("RGB")
-                        scale  = 1080 / img.width
-                        new_h  = int(img.height * scale)
-                        img    = img.resize((1080, new_h), Image.LANCZOS)
-                        canvas = Image.new("RGB", (1080, 1920), (0, 0, 0))
-                        if new_h >= 1920:
-                            y_src = (new_h - 1920) // 2
-                            img   = img.crop((0, y_src, 1080, y_src + 1920))
-                            canvas.paste(img, (0, 0))
-                        else:
-                            canvas.paste(img, (0, (1920 - new_h) // 2))
-                        canvas.save(dst)
-
+                    out_path = str(rendered_dir / f"appad_{r['id']}.png")
                     await asyncio.to_thread(_render_image_meme, source, out_path)
-
                     db2 = await get_db()
                     try:
                         await db2.execute(

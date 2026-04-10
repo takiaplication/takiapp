@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useProjectStore } from '../../store/projectStore'
 import * as api from '../../api/projects'
+import type { MemeCategory } from '../../api/projects'
 import { useJobProgress } from '../../hooks/useJobProgress'
 import MemeLibraryModal from './MemeLibraryModal'
 
@@ -63,10 +64,10 @@ export default function FramesStep({ onNext, onBack }: Props) {
     extractJob.start(jobId)
   }
 
-  const handleMemeAssigned = (slideId: string, frameUrl: string, holdMs: number) => {
+  const handleMemeAssigned = (slideId: string, frameUrl: string, holdMs: number, category: MemeCategory) => {
     setFrames((f) =>
       f.map((fr) =>
-        fr.id === slideId ? { ...fr, frame_url: frameUrl, hold_duration_ms: holdMs } : fr
+        fr.id === slideId ? { ...fr, frame_url: frameUrl, hold_duration_ms: holdMs, meme_category: category } : fr
       )
     )
     setLibrarySlideId(null)
@@ -82,7 +83,8 @@ export default function FramesStep({ onNext, onBack }: Props) {
         <MemeLibraryModal
           projectId={currentProject.id}
           slideId={librarySlideId}
-          onAssigned={(url, ms) => handleMemeAssigned(librarySlideId, url, ms)}
+          initialCategory={(frames.find((f) => f.id === librarySlideId)?.meme_category as MemeCategory) ?? undefined}
+          onAssigned={(url, ms, cat) => handleMemeAssigned(librarySlideId, url, ms, cat)}
           onClose={() => setLibrarySlideId(null)}
         />
       )}
@@ -247,11 +249,11 @@ export default function FramesStep({ onNext, onBack }: Props) {
                     </button>
                   ) : (
                     <button
-                      className="absolute bottom-1.5 left-1.5 text-xs px-1.5 py-0.5 rounded font-medium bg-amber-500/90 text-black hover:bg-red-500/90 hover:text-white transition-colors"
+                      className="absolute bottom-1.5 left-1.5 text-xs px-1.5 py-0.5 rounded font-medium bg-amber-500/90 text-black hover:bg-red-500/90 hover:text-white transition-colors max-w-[90%] truncate"
                       onClick={(e) => { e.stopPropagation(); toggleFrameType(frame.id, 'meme') }}
                       title="Verkeerd geclassificeerd? Klik om naar DM te zetten"
                     >
-                      Meme ↺
+                      {frame.meme_category ? `meme — ${frame.meme_category} ↺` : 'Meme ↺'}
                     </button>
                   )}
 
@@ -321,7 +323,7 @@ export default function FramesStep({ onNext, onBack }: Props) {
                   ? '🔵 DM slide'
                   : selectedFrame.frame_type === 'app_ad'
                   ? '🟢 App Ad (1s)'
-                  : '🟡 Meme'} — klik om te wisselen
+                  : selectedFrame.meme_category ? `🟡 Meme — ${selectedFrame.meme_category}` : '🟡 Meme'} — klik om te wisselen
               </button>
 
               {(selectedFrame.frame_type === 'meme' || selectedFrame.frame_type === 'app_ad') && (

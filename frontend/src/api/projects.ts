@@ -103,9 +103,10 @@ export interface FrameSlide {
   sort_order: number
   source_frame_path: string | null
   frame_url: string | null
-  frame_type: string   // 'dm' | 'meme'
+  frame_type: string        // 'dm' | 'meme' | 'app_ad'
   is_active: boolean
   hold_duration_ms: number
+  meme_category: string | null   // 'opening' | 'sport' | 'coocked' | 'cooking' | 'shoot_our_shot' | 'succes'
 }
 
 export async function importUrl(projectId: string, url: string): Promise<string> {
@@ -150,11 +151,23 @@ export async function listFrameSlides(projectId: string): Promise<FrameSlide[]> 
 
 // --- Meme library ---
 
+export type MemeCategory = 'opening' | 'sport' | 'coocked' | 'cooking' | 'shoot_our_shot' | 'succes'
+
+export const MEME_CATEGORIES: { id: MemeCategory; label: string; emoji: string }[] = [
+  { id: 'opening',        label: 'Opening',        emoji: '🎬' },
+  { id: 'sport',          label: 'Sport',          emoji: '⚽' },
+  { id: 'coocked',        label: 'Coocked',        emoji: '😬' },
+  { id: 'cooking',        label: 'Cooking',        emoji: '🔥' },
+  { id: 'shoot_our_shot', label: 'Shoot our shot', emoji: '🎯' },
+  { id: 'succes',         label: 'Succes',         emoji: '🏆' },
+]
+
 export interface LibraryMeme {
   filename: string
   name: string
-  url: string       // e.g. /meme-library/grappig.jpg
+  url: string              // e.g. /meme-library/cooking/grappig.jpg
   type: 'image' | 'video'
+  category: MemeCategory
 }
 
 export async function listMemeLibrary(): Promise<LibraryMeme[]> {
@@ -162,9 +175,10 @@ export async function listMemeLibrary(): Promise<LibraryMeme[]> {
   return res.data
 }
 
-export async function uploadToMemeLibrary(file: File): Promise<LibraryMeme> {
+export async function uploadToMemeLibrary(file: File, category: MemeCategory): Promise<LibraryMeme> {
   const form = new FormData()
   form.append('file', file)
+  form.append('category', category)
   const res = await api.post('/meme-library/upload', form)
   return res.data
 }
@@ -172,11 +186,12 @@ export async function uploadToMemeLibrary(file: File): Promise<LibraryMeme> {
 export async function assignLibraryMeme(
   projectId: string,
   slideId: string,
+  category: MemeCategory,
   filename: string,
-): Promise<{ frame_url: string; hold_duration_ms: number }> {
+): Promise<{ frame_url: string; hold_duration_ms: number; meme_category: string }> {
   const res = await api.post(
     `/projects/${projectId}/slides/${slideId}/assign-library-meme`,
-    { filename },
+    { category, filename },
   )
   return res.data
 }

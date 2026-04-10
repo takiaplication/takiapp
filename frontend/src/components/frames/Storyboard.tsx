@@ -17,13 +17,14 @@ import { CSS } from '@dnd-kit/utilities'
 
 const API_BASE = 'http://localhost:8000'
 
-function SortableSlide({ id, index, isActive, isMeme, isAppAd, frameUrl, onClick, onDelete }: {
+function SortableSlide({ id, index, isActive, isMeme, isAppAd, frameUrl, memeCategory, onClick, onDelete }: {
   id: string
   index: number
   isActive: boolean
   isMeme: boolean
   isAppAd: boolean
   frameUrl: string | null
+  memeCategory: string | null
   onClick: () => void
   onDelete: () => void
 }) {
@@ -107,6 +108,12 @@ function SortableSlide({ id, index, isActive, isMeme, isAppAd, frameUrl, onClick
         }`}>
           {isAppAd ? 'APP AD' : isMeme ? 'MEME' : 'DM'}
         </span>
+        {/* Meme category sub-label */}
+        {isMeme && memeCategory && (
+          <span className="text-[7px] font-bold px-1 py-0.5 rounded bg-black/60 text-amber-300 leading-none max-w-[56px] truncate text-center">
+            {memeCategory}
+          </span>
+        )}
         {/* Slide number */}
         <span className={`font-bold ${
           isAppAd
@@ -172,6 +179,7 @@ export default function Storyboard() {
                 isMeme={slide.frame_type === 'meme'}
                 isAppAd={slide.frame_type === 'app_ad'}
                 frameUrl={slide.frame_url ?? null}
+                memeCategory={slide.meme_category ?? null}
                 onClick={() => selectSlide(slide.id)}
                 onDelete={() => handleDelete(slide.id)}
               />

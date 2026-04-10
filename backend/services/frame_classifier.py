@@ -17,7 +17,8 @@ import cv2
 import numpy as np
 from typing import Literal
 
-FrameType = Literal["dm", "meme", "app_ad"]
+FrameType    = Literal["dm", "meme", "app_ad"]
+MemeCategory = Literal["opening", "sport", "coocked", "cooking", "shoot_our_shot", "succes"]
 
 
 # ── API key helper ────────────────────────────────────────────────────────────
@@ -227,3 +228,91 @@ async def classify_frame_ai(image_path: str) -> FrameType:
     except Exception:
         # Any API error → fall back to heuristic
         return await asyncio.to_thread(_heuristic, image_path)
+
+
+# ── Meme category classification ──────────────────────────────────────────────
+
+_MEME_CATEGORY_PROMPT = (
+    "Look at this image carefully. It is a meme or video clip used in a social-media reel about dating / rizz.\n\n"
+    "Classify it into ONE of these 4 categories:\n\n"
+    "sport          — A clean sports fragment: someone doing sport, an athletic move, a game highlight, "
+    "fitness clip.\n\n"
+    "coocked        — Things are going badly / an awkward or cringe moment in the conversation. "
+    "The guy looks embarrassed, nervous, or the reply was bad.\n\n"
+    "cooking        — Things are going very well / a smooth or confident moment, conversation is on fire. "
+    "The guy looks cool, confident, winning.\n\n"
+    "shoot_our_shot — A bold, daring, or risky message was just sent; taking a big shot, "
+    "will it land?\n\n"
+    "Reply with ONLY one word:  sport   OR   coocked   OR   cooking   OR   shoot_our_shot"
+)
+
+
+async def classify_meme_category_ai(
+    image_path: str,
+    is_first: bool = False,
+    is_last: bool = False,
+) -> MemeCategory:
+    """
+    Classify a meme frame into one of 6 library categories.
+
+    Rules:
+    - First meme slot in the video → always 'opening'   (watch-me-rizz hook)
+    - Last  meme slot in the video → always 'succes'    (it worked out ending)
+    - All other slots              → ask GPT-4o-mini to pick from the middle 4
+    Falls back to 'cooking' if no API key is set or the call fails.
+    """
+    if is_first:
+        return "opening"
+    if is_last:
+        return "succes"
+
+    api_key = await _get_api_key()
+    if not api_key:
+        return "cooking"   # safe default without API
+
+    img = cv2.imread(image_path)
+    if img is None:
+        return "cooking"
+
+    h, w = img.shape[:2]
+    scale = min(512 / w, 768 / h, 1.0)
+    small = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
+    _, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    b64 = base64.b64encode(buf.tobytes()).decode()
+
+    def _call() -> MemeCategory:
+        from openai import OpenAI  # noqa: PLC0415
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_tokens=10,
+            temperature=0,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{b64}",
+                            "detail": "low",
+                        },
+                    },
+                    {"type": "text", "text": _MEME_CATEGORY_PROMPT},
+                ],
+            }],
+        )
+        answer = resp.choices[0].message.content.strip().lower()
+        if answer.startswith("sport"):
+            return "sport"
+        if answer.startswith("coocked") or answer.startswith("cooked"):
+            return "coocked"
+        if answer.startswith("shoot"):
+            return "shoot_our_shot"
+        if answer.startswith("cooking"):
+            return "cooking"
+        return "cooking"   # safe default
+
+    try:
+        return await asyncio.to_thread(_call)
+    except Exception:
+        return "cooking"

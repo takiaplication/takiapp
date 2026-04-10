@@ -6,11 +6,11 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, File, UploadFile
 from pydantic import BaseModel
 
-from config import STORAGE_DIR, PROJECTS_DIR
+from config import STORAGE_DIR, PROJECTS_DIR, MEME_LIBRARY_DIR
 from database import get_db
 from services.downloader import download_video
 from services.frame_extractor import extract_scenes
-from services.frame_classifier import classify_frame_ai
+from services.frame_classifier import classify_frame_ai, classify_meme_category_ai
 from services.ocr_service import (
     ocr_frame, classify_sender, filter_message_blocks,
     extract_messages_vision,
@@ -20,11 +20,18 @@ from services.job_manager import job_manager
 
 
 def _to_url_path(abs_path: Optional[str]) -> Optional[str]:
-    """Convert an absolute storage path to a /files/... URL path."""
+    """Convert an absolute storage path to a browser-accessible URL."""
     if not abs_path:
         return None
+    p = Path(abs_path)
+    # Check meme library first (category subdirs live inside MEME_LIBRARY_DIR)
     try:
-        rel = Path(abs_path).relative_to(STORAGE_DIR)
+        rel = p.relative_to(MEME_LIBRARY_DIR)
+        return f"/meme-library/{rel.as_posix()}"
+    except ValueError:
+        pass
+    try:
+        rel = p.relative_to(STORAGE_DIR)
         return f"/files/{rel.as_posix()}"
     except ValueError:
         return None
@@ -161,9 +168,27 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
         app_ad_slots = sum(1 for _, t in collapsed if t == "app_ad")
         dm_slots     = sum(1 for _, t in collapsed if t == "dm")
         await progress_callback(
-            0.99,
+            0.97,
             f"Collapsed → {dm_slots} DM + {meme_slots} meme + {app_ad_slots} app_ad = {len(collapsed)} total",
         )
+
+        # ── STAGE 3b (97–99 %): classify each meme slot into a library category
+        # Rule: first meme → "opening", last meme → "succes", rest → GPT picks.
+        meme_indices = [i for i, (_, t) in enumerate(collapsed) if t == "meme"]
+        meme_categories: dict[int, str] = {}
+
+        for rank, idx in enumerate(meme_indices):
+            is_first = (rank == 0)
+            is_last  = (rank == len(meme_indices) - 1) and len(meme_indices) > 1
+            fp       = collapsed[idx][0]
+            cat      = await classify_meme_category_ai(fp, is_first=is_first, is_last=is_last)
+            meme_categories[idx] = cat
+            await progress_callback(
+                0.97 + 0.02 * (rank + 1) / max(len(meme_indices), 1),
+                f"Meme {rank + 1}/{len(meme_indices)} → category: {cat}",
+            )
+
+        await progress_callback(0.99, "Stage 3b done — meme categories assigned")
 
         # ── STAGE 4 (99–100 %): single fast DB write ─────────────────────────
         db2 = await get_db()
@@ -172,25 +197,29 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
             for i, (frame_path, ftype) in enumerate(collapsed):
                 if ftype == "meme":
                     default_hold = 1500
+                    cat = meme_categories.get(i, "cooking")
                 elif ftype == "app_ad":
                     default_hold = 1000
+                    cat = None
                 else:  # dm
                     default_hold = 3000
+                    cat = None
                 await db2.execute(
                     """INSERT INTO slides
                        (id, project_id, sort_order, slide_type, source_frame_path,
-                        frame_type, is_active, hold_duration_ms)
-                       VALUES (?, ?, ?, 'dm', ?, ?, 1, ?)""",
-                    (str(uuid.uuid4()), project_id, i, frame_path, ftype, default_hold),
+                        frame_type, is_active, hold_duration_ms, meme_category)
+                       VALUES (?, ?, ?, 'dm', ?, ?, 1, ?, ?)""",
+                    (str(uuid.uuid4()), project_id, i, frame_path, ftype, default_hold, cat),
                 )
             await db2.commit()
         finally:
             await db2.close()
 
         return {
-            "raw_frames": len(raw_frames),
-            "classified": len(classified),
-            "collapsed":  len(collapsed),
+            "raw_frames":  len(raw_frames),
+            "classified":  len(classified),
+            "collapsed":   len(collapsed),
+            "meme_categories": meme_categories,
         }
 
     await job_manager.submit(job_id, _extract)
@@ -535,7 +564,8 @@ async def list_frames(project_id: str):
     db = await get_db()
     try:
         cursor = await db.execute(
-            """SELECT id, sort_order, source_frame_path, frame_type, is_active, hold_duration_ms
+            """SELECT id, sort_order, source_frame_path, frame_type, is_active,
+                      hold_duration_ms, meme_category
                FROM slides WHERE project_id=? AND is_active=1 ORDER BY sort_order""",
             (project_id,),
         )
@@ -543,15 +573,17 @@ async def list_frames(project_id: str):
     finally:
         await db.close()
 
+    keys = rows[0].keys() if rows else []
     return [
         {
-            "id": r["id"],
-            "sort_order": r["sort_order"],
-            "source_frame_path": r["source_frame_path"] if "source_frame_path" in r.keys() else None,
-            "frame_url": _to_url_path(r["source_frame_path"] if "source_frame_path" in r.keys() else None),
-            "frame_type": r["frame_type"] if "frame_type" in r.keys() else "dm",
-            "is_active": bool(r["is_active"]),
-            "hold_duration_ms": r["hold_duration_ms"],
+            "id":                r["id"],
+            "sort_order":        r["sort_order"],
+            "source_frame_path": r["source_frame_path"] if "source_frame_path" in keys else None,
+            "frame_url":         _to_url_path(r["source_frame_path"] if "source_frame_path" in keys else None),
+            "frame_type":        r["frame_type"] if "frame_type" in keys else "dm",
+            "is_active":         bool(r["is_active"]),
+            "hold_duration_ms":  r["hold_duration_ms"],
+            "meme_category":     r["meme_category"] if "meme_category" in keys else None,
         }
         for r in rows
     ]

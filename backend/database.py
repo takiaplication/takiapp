@@ -96,6 +96,7 @@ async def init_db():
             ("slides", "source_frame_path", "TEXT"),
             ("slides", "frame_type", "TEXT DEFAULT 'dm'"),
             ("slides", "extracted_clip_path", "TEXT"),
+            ("slides", "meme_category", "TEXT"),
             ("projects", "source_url", "TEXT"),
             ("projects", "video_path", "TEXT"),
         ]

@@ -16,8 +16,8 @@ def _to_frame_url(source_frame_path: Optional[str]) -> Optional[str]:
         return None
     p = Path(source_frame_path)
     try:
-        p.relative_to(MEME_LIBRARY_DIR)
-        return f"/meme-library/{p.name}"
+        rel = p.relative_to(MEME_LIBRARY_DIR)
+        return f"/meme-library/{rel.as_posix()}"   # handles category/filename subdirs
     except ValueError:
         pass
     try:
@@ -33,6 +33,7 @@ def _row_to_response(r) -> dict:
     d["frame_type"]         = d.get("frame_type") or "dm"
     d["frame_url"]          = _to_frame_url(d.get("source_frame_path"))
     d["extracted_clip_url"] = _to_frame_url(d.get("extracted_clip_path"))
+    d["meme_category"]      = d.get("meme_category")   # None for non-meme slides
     return d
 
 

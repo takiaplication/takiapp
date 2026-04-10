@@ -34,3 +34,4 @@ class SlideResponse(BaseModel):
     rendered_path: Optional[str] = None
     is_active: bool
     hold_duration_ms: int
+    meme_category: Optional[str] = None       # e.g. "opening" | "cooking" | "succes" …

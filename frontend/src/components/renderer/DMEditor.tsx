@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react'
 import { useProjectStore } from '../../store/projectStore'
-import { uploadStoryImage, uploadMemeToSlide, useOriginalClip, saveClipToLibrary } from '../../api/projects'
+import { uploadStoryImage, uploadMemeToSlide, useOriginalClip, saveClipToLibrary, MEME_CATEGORIES } from '../../api/projects'
 import type { Message } from '../../types/project'
+import type { MemeCategory } from '../../api/projects'
 import MemeLibraryModal from '../frames/MemeLibraryModal'
 
 const API_BASE = 'http://localhost:8000'
@@ -23,7 +24,7 @@ function MemeSlidePanel({ slideId, projectId }: { slideId: string; projectId: st
   const hasAssigned       = !!slide?.frame_url
   const isAssignedVideo   = slide?.frame_url?.match(/\.(mp4|mov|webm)$/i)
 
-  const handleAssigned = (frameUrl: string, holdMs: number) => {
+  const handleAssigned = (frameUrl: string, holdMs: number, _category: MemeCategory) => {
     updateSlideMeme(slideId, frameUrl, holdMs)
     setShowLibrary(false)
   }
@@ -53,9 +54,19 @@ function MemeSlidePanel({ slideId, projectId }: { slideId: string; projectId: st
     <div className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <span className="bg-amber-500/20 text-amber-400 text-xs font-bold px-2 py-0.5 rounded border border-amber-500/30">
-          🎭 MEME SLIDE
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="bg-amber-500/20 text-amber-400 text-xs font-bold px-2 py-0.5 rounded border border-amber-500/30">
+            🎭 MEME SLIDE
+          </span>
+          {slide?.meme_category && (() => {
+            const cat = MEME_CATEGORIES.find((c) => c.id === slide.meme_category)
+            return cat ? (
+              <span className="bg-zinc-800 text-zinc-300 text-xs px-2 py-0.5 rounded border border-zinc-700">
+                {cat.emoji} {cat.label}
+              </span>
+            ) : null
+          })()}
+        </div>
         {hasExtracted && (
           <button
             onClick={handleSaveToLibrary}
@@ -220,6 +231,7 @@ function MemeSlidePanel({ slideId, projectId }: { slideId: string; projectId: st
         <MemeLibraryModal
           projectId={projectId}
           slideId={slideId}
+          initialCategory={(slide?.meme_category as MemeCategory) ?? undefined}
           onAssigned={handleAssigned}
           onClose={() => setShowLibrary(false)}
         />
