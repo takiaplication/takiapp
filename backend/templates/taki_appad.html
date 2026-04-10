@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080, height=1920">
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 1080px;
+    height: 1920px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display',
+                 'Helvetica Neue', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    background: linear-gradient(180deg, #e8f4ff 0%, #c8e8ff 100%);
+    display: flex;
+    flex-direction: column;
+}
+
+/* ═══════════════════════ HEADER ═══════════════════════ */
+/*  Matches screenshot: pink chevron left, bold pink "Taki"
+    centred, pink filled circle (+) right                  */
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 80px 64px 40px;
+    flex-shrink: 0;
+}
+
+.back-arrow {
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 72px;
+    font-weight: 300;
+    color: #FF4D8D;
+    line-height: 1;
+    /* nudge the glyph up slightly so it looks optically centred */
+    padding-bottom: 6px;
+}
+
+.app-title {
+    font-size: 80px;
+    font-weight: 900;
+    color: #FF4D8D;
+    letter-spacing: -2px;
+    line-height: 1;
+}
+
+.plus-btn {
+    width: 88px;
+    height: 88px;
+    background: #FF4D8D;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 56px;
+    font-weight: 300;
+    line-height: 1;
+    /* nudge + symbol for optical centre */
+    padding-bottom: 4px;
+}
+
+/* ═══════════════════════ DM SCREENSHOT CARD ═══════════════════════ */
+/*  White rounded-rectangle card, landscape, with white padding that
+    acts as an inner border around the dark DM screenshot.
+    In the real Taki screenshot the card is wider than tall (~ 4:3).  */
+
+.card-section {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 72px;
+    min-height: 0;
+}
+
+.dm-card {
+    width: 936px;          /* full width minus outer padding × 2 */
+    /* height controlled by padding + inner screenshot height */
+    background: white;
+    border-radius: 32px;
+    padding: 18px;
+    box-shadow:
+        0 20px 56px rgba(30, 80, 200, 0.18),
+        0  6px 18px rgba(20, 60, 160, 0.10);
+    flex-shrink: 0;
+}
+
+.dm-screenshot {
+    width: 100%;
+    /* Show approximately the bottom 55 % of the portrait DM PNG
+       so the most-recent messages are always visible.
+       Height = 900 × 900/1080 × 16/9  ≈  960 — cap at 820 to keep
+       proportions sane for the overall layout.                        */
+    height: 820px;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #111;
+}
+
+.dm-screenshot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    /* show bottom of the DM — the latest messages */
+    object-position: center bottom;
+    display: block;
+}
+
+.dm-screenshot-empty {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1a1a1a;
+    color: #555;
+    font-size: 72px;
+}
+
+/* ═══════════════════════ BOTTOM — BLUE AI BUBBLE ═══════════════════════ */
+
+.bottom-section {
+    padding: 24px 72px 96px;
+    flex-shrink: 0;
+}
+
+.ai-bubble {
+    background: #2196F3;
+    border-radius: 28px;
+    padding: 44px 56px;
+    color: white;
+    font-size: 52px;
+    font-weight: 600;
+    line-height: 1.40;
+    text-align: left;
+    word-break: break-word;
+
+    /* cap at 3 lines so very long messages don't overflow the canvas */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.tap-copy {
+    text-align: center;
+    color: #9E9E9E;
+    font-size: 36px;
+    font-weight: 400;
+    margin-top: 24px;
+}
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<div class="header">
+    <div class="back-arrow">&#8249;</div>
+    <div class="app-title">Taki</div>
+    <div class="plus-btn">+</div>
+</div>
+
+<!-- ── DM SCREENSHOT CARD ── -->
+<div class="card-section">
+    <div class="dm-card">
+        <div class="dm-screenshot">
+            {% if dm_screenshot_url %}
+                <img src="{{ dm_screenshot_url }}" alt="DM screenshot" />
+            {% else %}
+                <div class="dm-screenshot-empty">💬</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ── AI SUGGESTION BUBBLE ── -->
+<div class="bottom-section">
+    <div class="ai-bubble">{{ next_message }}</div>
+    <div class="tap-copy">tap to copy</div>
+</div>
+
+</body>
+</html>

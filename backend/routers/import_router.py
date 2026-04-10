@@ -515,6 +515,107 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
             finally:
                 await db_batch2.close()
 
+        # ── APP_AD AUTO-RENDER (Taki UI) ──────────────────────────────────────
+        # Runs AFTER batch translation so the blue bubble shows Dutch text.
+        # For each app_ad slot:
+        #   • DM screenshot  → second-to-last DM slide before the slot
+        #                       (render fresh if not cached, reuse if already on disk)
+        #   • Next message   → first translated message of the last DM slide before slot
+        # Renders the Taki Jinja2 template with Playwright and saves the PNG.
+
+        await progress_callback(0.97, "App-ad slides genereren (Taki UI)…")
+
+        # Lazy imports — avoid circular deps at module load time
+        from services.dm_renderer import renderer as _renderer, _make_jitter   # noqa: PLC0415
+        from routers.renderer import _build_conversation_for_slide as _build_conv  # noqa: PLC0415
+        from services.appad_renderer import render_taki_appad                  # noqa: PLC0415
+
+        # Fetch the full ordered slide list (we need frame_type + rendered_path)
+        db_appad = await get_db()
+        try:
+            _appad_cur = await db_appad.execute(
+                """SELECT id, sort_order, frame_type, rendered_path
+                   FROM slides
+                   WHERE project_id=? AND is_active=1
+                   ORDER BY sort_order""",
+                (project_id,),
+            )
+            all_ordered = await _appad_cur.fetchall()
+        finally:
+            await db_appad.close()
+
+        appad_rendered_dir = PROJECTS_DIR / project_id / "rendered"
+        appad_rendered_dir.mkdir(exist_ok=True)
+
+        for _slot_idx, _slot in enumerate(all_ordered):
+            _ft = _slot["frame_type"] if "frame_type" in _slot.keys() else "dm"
+            if _ft != "app_ad":
+                continue
+
+            # ── DM slides that precede this app_ad slot ──────────────────
+            _dm_before = [
+                s for s in all_ordered[:_slot_idx]
+                if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
+            ]
+
+            # ── DM screenshot: second-to-last DM before this slot ────────
+            # Fall back to the only DM if there is just one.
+            _screenshot_src = (
+                _dm_before[-2] if len(_dm_before) >= 2 else
+                _dm_before[-1] if _dm_before else None
+            )
+            _dm_png: Optional[bytes] = None
+            if _screenshot_src:
+                _cached = (
+                    _screenshot_src["rendered_path"]
+                    if "rendered_path" in _screenshot_src.keys()
+                    else None
+                )
+                if _cached and Path(_cached).exists():
+                    # Reuse already-rendered PNG
+                    _dm_png = Path(_cached).read_bytes()
+                else:
+                    # Render fresh via Playwright
+                    _conv = await _build_conv(project_id, _screenshot_src["id"])
+                    _dm_png = await _renderer.render_slide(
+                        _conv, jitter=_make_jitter(_conv.theme)
+                    )
+
+            # ── Next message: first translated message of last DM before slot ──
+            _next_msg = ""
+            if _dm_before:
+                _last_dm = _dm_before[-1]
+                _db_msg = await get_db()
+                try:
+                    _msg_row = await (await _db_msg.execute(
+                        "SELECT text FROM messages WHERE slide_id=? ORDER BY sort_order LIMIT 1",
+                        (_last_dm["id"],),
+                    )).fetchone()
+                    if _msg_row and _msg_row["text"]:
+                        _next_msg = _msg_row["text"]
+                finally:
+                    await _db_msg.close()
+
+            # ── Render Taki template with Playwright ─────────────────────
+            _appad_png = await render_taki_appad(_dm_png, _next_msg, _renderer)
+
+            _appad_out = str(appad_rendered_dir / f"appad_{_slot['id']}.png")
+            Path(_appad_out).write_bytes(_appad_png)
+
+            # Store path in DB — both source_frame_path (for Frames review UI)
+            # and rendered_path (so the compositor reuses it without re-rendering)
+            _db_store = await get_db()
+            try:
+                await _db_store.execute(
+                    "UPDATE slides SET source_frame_path=?, rendered_path=? WHERE id=?",
+                    (_appad_out, _appad_out, _slot["id"]),
+                )
+                await _db_store.commit()
+            finally:
+                await _db_store.close()
+
+            await progress_callback(0.99, f"App-ad slide gegenereerd: appad_{_slot['id'][:8]}.png")
+
         await progress_callback(1.0, f"Done — {len(dm_slides)} DM slides, {len(all_msgs)} messages translated")
         return {"slides_processed": total, "dm_slides": len(dm_slides)}
 
