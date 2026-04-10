@@ -15,7 +15,7 @@ from services.ocr_service import (
     ocr_frame, classify_sender, filter_message_blocks,
     extract_messages_vision,
 )
-from services.translation_service import translate_text, batch_translate_conversation
+from services.translation_service import batch_translate_conversation
 from services.job_manager import job_manager
 
 
@@ -496,7 +496,7 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
                     frame_path, _ocr_api_key
                 )
             else:
-                # ── Fallback: EasyOCR + translate ───────────────────────
+                # ── Fallback: EasyOCR (raw text, no per-message translation) ──
                 import cv2 as _cv2_ocr  # noqa: PLC0415
                 raw_blocks = await ocr_frame(frame_path)
                 _img = await asyncio.to_thread(_cv2_ocr.imread, frame_path)
@@ -505,10 +505,8 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
                     raw_blocks, image_height=img_h, image_width=img_w,
                 )
                 raw_msgs = classify_sender(filtered_blocks, image_width=img_w)
-                messages = []
-                for m in raw_msgs:
-                    translated = await translate_text(m["text"], target_lang="nl")
-                    messages.append({"sender": m["sender"], "text": translated})
+                # Collect raw text — single batch translation happens below
+                messages = [{"sender": m["sender"], "text": m["text"]} for m in raw_msgs]
 
             # Auto-create story_reply layout when detected
             if has_story_reply and messages:
@@ -535,19 +533,20 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
             finally:
                 await db3.close()
 
-        # ── BATCH CONSISTENCY PASS ────────────────────────────────────────
-        # After all slides are OCR'd individually, re-translate the whole
-        # conversation in one call so the same slang is used consistently
-        # across slides (e.g. "gooning" always → "raggen", not sometimes
-        # "raggen" and sometimes "doen").
+        # ── SINGLE BATCH TRANSLATION ──────────────────────────────────────
+        # Translate the entire conversation in ONE GPT call so that every
+        # occurrence of the same slang gets the same Dutch equivalent.
+        # OCR above intentionally extracted raw (untranslated) text so that
+        # this pass is the sole translation step.
 
-        await progress_callback(0.95, "Consistency pass — re-translating full conversation…")
+        await progress_callback(0.95, "Vertalen — volledige conversatie in één batch…")
 
-        # Fetch every message that was just written
+        # Fetch every raw message that was just written, with slide sort_order
         db_batch = await get_db()
         try:
             batch_cursor = await db_batch.execute(
-                """SELECT m.id, m.slide_id, m.sort_order, m.text
+                """SELECT m.id, m.slide_id, m.sort_order, m.sender, m.text,
+                          s.sort_order AS slide_order
                    FROM messages m
                    JOIN slides s ON s.id = m.slide_id
                    WHERE s.project_id=?
@@ -559,9 +558,16 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
             await db_batch.close()
 
         if all_msgs:
+            # Build payload: slide = slide sort_order, index = message sort_order
             payload = [
-                {"msg_id": r["id"], "slide_id": r["slide_id"],
-                 "sort_order": r["sort_order"], "text": r["text"]}
+                {
+                    "msg_id":   r["id"],
+                    "slide_id": r["slide_id"],
+                    "slide":    r["slide_order"],
+                    "index":    r["sort_order"],
+                    "sender":   r["sender"],
+                    "text":     r["text"],
+                }
                 for r in all_msgs
             ]
             consistent = await batch_translate_conversation(payload)

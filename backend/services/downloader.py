@@ -5,6 +5,11 @@ from typing import Optional, Callable
 
 from config import PROJECTS_DIR
 
+# Prefer the Homebrew-managed binary (kept up to date by `brew upgrade`).
+# Fall back to whatever is on PATH if the Homebrew path doesn't exist.
+_HOMEBREW_YTDLP = "/opt/homebrew/bin/yt-dlp"
+_YTDLP = _HOMEBREW_YTDLP if Path(_HOMEBREW_YTDLP).exists() else "yt-dlp"
+
 
 async def download_video(
     url: str,
@@ -32,7 +37,7 @@ async def download_video(
             stale.unlink()
 
     cmd = [
-        "yt-dlp",
+        _YTDLP,
         "--no-playlist",
         # Best MP4+audio; fall back to any best quality
         "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",

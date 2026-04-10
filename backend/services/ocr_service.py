@@ -11,9 +11,7 @@ Je analyseert een Instagram Direct Message (DM) screenshot.
 
 EXTRAHEER: Alleen de tekst van echte berichtbubbels (de daadwerkelijke conversatie).
 AFZENDER: 'self' = rechts-uitgelijnd blauw bubbel (verstuurd), 'other' = links-uitgelijnd grijs/donker bubbel (ontvangen).
-VERTAAL: Vertaal elk bericht DIRECT naar Nederlands straatjeugdtaal. Match de toon EXACT:
-  - Informeel/slang origineel → gebruik Nederlandse equivalenten: ff, gwn, bro, sws, ngl, ewa, mano, vro, wallah, joh, mn, boeie, da's zwaar, chill, fk dat, kl, echt niet, wtf, haha, lmao, etc.
-  - Schuttingtaal blijft schuttingtaal. Maak het NOOIT netter.
+TEKST: Geef de originele tekst EXACT terug zoals die in het screenshot staat — GEEN vertaling, GEEN aanpassing.
   - Bewaar alle emojis exact zoals ze zijn.
 
 NEGEER VOLLEDIG (NIET opnemen in output):
@@ -28,8 +26,8 @@ NEGEER VOLLEDIG (NIET opnemen in output):
 Geef ALLEEN geldige JSON terug (geen markdown, geen uitleg):
 {
   "messages": [
-    {"sender": "self", "text": "nederlandse tekst"},
-    {"sender": "other", "text": "nederlandse tekst"}
+    {"sender": "self", "text": "original text"},
+    {"sender": "other", "text": "original text"}
   ],
   "has_story_reply": false
 }

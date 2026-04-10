@@ -90,26 +90,41 @@ async def translate_text(
 
 async def batch_translate_conversation(
     messages: list[dict],
+    target_lang: str = "nl",
 ) -> list[dict]:
     """
-    Re-translate an ENTIRE conversation in one call for consistency.
+    Translate an ENTIRE conversation in one GPT call for consistency.
 
-    Input:  [{"slide_id": ..., "msg_id": ..., "text": ...}, ...]
+    Input:  [{"slide": int, "index": int, "sender": str, "text": str, ...}, ...]
     Output: same list with "text" replaced by a consistent Dutch translation.
 
-    Why: when OCR translated each slide independently, the same English slang
-    could become two different Dutch words across slides.  This pass sees the
-    full conversation context and picks consistent equivalents throughout.
+    Using slide + index as the two-level key guarantees that the same phrase
+    always maps to the same Dutch slang word across all slides.
+    Extra fields (msg_id, slide_id, etc.) are preserved unchanged.
     Falls back to returning the originals unchanged if no API key is configured.
     """
+    import json as _json
+
     api_key = await _get_api_key()
     if not api_key or not messages:
         return messages
 
-    # Build numbered message list so GPT can return them with IDs
-    lines = "\n".join(
-        f'[{i}] ({m["slide_id"][:8]}…) {m["text"]}'
-        for i, m in enumerate(messages)
+    lang_names = {
+        "nl": "Dutch", "en": "English", "fr": "French", "de": "German",
+        "es": "Spanish", "pt": "Portuguese", "it": "Italian",
+        "ru": "Russian", "ar": "Arabic", "zh-cn": "Chinese (Simplified)",
+        "ja": "Japanese", "ko": "Korean",
+    }
+    lang_name = lang_names.get(target_lang, target_lang)
+
+    # Build the payload GPT will see — only the fields it needs
+    gpt_input = _json.dumps(
+        [
+            {"slide": m["slide"], "index": m["index"],
+             "sender": m["sender"], "text": m["text"]}
+            for m in messages
+        ],
+        ensure_ascii=False,
     )
 
     def _call() -> str:
@@ -117,28 +132,29 @@ async def batch_translate_conversation(
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
-            max_tokens=4000,
+            max_tokens=4096,
             temperature=0.2,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "Je krijgt een volledig Instagram DM-gesprek in de originele taal. "
-                        "Hervertaal elk bericht naar CONSISTENT Nederlands straatjeugdtaal. "
-                        "Gebruik dezelfde slang-keuze door het hele gesprek: als 'bro' eens 'bro' "
-                        "is, dan altijd 'bro'. Als 'gooning' 'raggen' is, dan overal 'raggen'. "
-                        "Match de rauwe toon EXACT — nooit netter maken. Emojis bewaren. "
-                        "Geef ALLEEN een JSON-array terug met dezelfde indexnummers:\n"
-                        '[{"i": 0, "text": "..."}, {"i": 1, "text": "..."}, ...]'
+                        f"Je krijgt een volledig Instagram DM-gesprek. "
+                        f"Vertaal elk bericht naar CONSISTENT {lang_name} straatjeugdtaal. "
+                        "Gebruik EXACT dezelfde slang-keuze door het hele gesprek: "
+                        "als 'bro' één keer 'bro' is, dan altijd 'bro'. "
+                        "Als 'gooning' 'raggen' is, dan overal 'raggen'. "
+                        "Match de rauwe toon EXACT — maak het NOOIT netter dan het origineel. "
+                        "Schuttingtaal blijft schuttingtaal. Bewaar alle emojis. "
+                        "Geef ALLEEN een JSON-array terug met dezelfde slide- en index-waarden:\n"
+                        '[{"slide": 1, "index": 0, "text": "..."}, ...]'
                     ),
                 },
-                {"role": "user", "content": lines},
+                {"role": "user", "content": gpt_input},
             ],
         )
         return resp.choices[0].message.content.strip()
 
     try:
-        import json as _json
         raw = await asyncio.to_thread(_call)
         # Strip markdown fences if present
         raw = raw.strip()
@@ -147,10 +163,12 @@ async def batch_translate_conversation(
             if raw.startswith("json"):
                 raw = raw[4:]
         results = _json.loads(raw.strip())
-        idx_map = {item["i"]: item["text"] for item in results}
+        # Key by (slide, index) for O(1) lookup
+        result_map = {(item["slide"], item["index"]): item["text"] for item in results}
         out = []
-        for i, m in enumerate(messages):
-            out.append({**m, "text": idx_map.get(i, m["text"])})
+        for m in messages:
+            key = (m["slide"], m["index"])
+            out.append({**m, "text": result_map.get(key, m["text"])})
         return out
     except Exception:
         return messages   # any parse failure → return originals unchanged
