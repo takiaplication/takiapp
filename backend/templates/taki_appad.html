@@ -96,14 +96,12 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   PHONE MOCKUP — 4 : 5 ratio, −20 % from original
-   Width  = 672 px  →  Height = 672 × 5/4 = 840 px
-   White bg, 8 px solid white border, 24 px rounded corners,
-   subtle blue-tinted drop shadow.
-
-   DM screenshot uses object-fit:contain so the FULL portrait
-   slide (1080×1920) is always visible — no cropping of messages.
-   The DM has a black background; any letterbox bars blend in.
+   PHONE MOCKUP — 1 : 1 square, 85 % of screen width = 918 px
+   The DM PNG is pre-cropped to the bubble bounding-box + 40 px
+   padding before being embedded, so object-fit:contain fills the
+   square cleanly without a large black void.
+   Dark frame background (#111) makes any thin letterbox bars
+   invisible for dark-mode DMs.
    ─────────────────────────────────────────────────────────── */
 .phone-section {
     flex-shrink: 0;
@@ -112,9 +110,9 @@ body {
 }
 
 .phone-frame {
-    width: 560px;
-    height: 700px;       /* 4 : 5 — centred in top-60 % zone */
-    background: #111;    /* dark bg so letterbox bars are invisible */
+    width: 918px;        /* 85 % of 1080 */
+    height: 918px;       /* 1 : 1 square  */
+    background: #111;    /* dark bg — letterbox bars invisible on dark DMs */
     border: 8px solid white;
     border-radius: 24px;
     overflow: hidden;
@@ -126,8 +124,7 @@ body {
 .phone-frame img {
     width: 100%;
     height: 100%;
-    /* contain = show the FULL DM PNG; portrait DM fits by height,
-       leaving narrow side bars that blend with the dark frame bg  */
+    /* contain: full cropped DM always visible; thin bars blend with frame */
     object-fit: contain;
     display: block;
 }
