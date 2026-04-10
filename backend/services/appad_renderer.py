@@ -14,11 +14,37 @@ png_bytes = await render_taki_appad(
 """
 
 import base64
+from pathlib import Path
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader
 
-from config import TEMPLATES_DIR
+from config import TEMPLATES_DIR, STORAGE_DIR
+
+# Logo is stored at storage/taki_logo.png — loaded once at import time.
+_LOGO_PATH = STORAGE_DIR / "taki_logo.png"
+
+
+def _load_logo_data_url() -> str:
+    """Return a base64 data-URL for the Taki logo, or '' if not found."""
+    for candidate in (
+        STORAGE_DIR / "taki_logo.png",
+        STORAGE_DIR / "taki_logo.jpg",
+        STORAGE_DIR / "taki_logo.svg",
+        STORAGE_DIR / "taki_logo.webp",
+    ):
+        if candidate.exists():
+            mime_map = {
+                ".png":  "image/png",
+                ".jpg":  "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".svg":  "image/svg+xml",
+                ".webp": "image/webp",
+            }
+            mime = mime_map.get(candidate.suffix.lower(), "image/png")
+            b64 = base64.b64encode(candidate.read_bytes()).decode()
+            return f"data:{mime};base64,{b64}"
+    return ""
 
 
 async def render_taki_appad(
@@ -50,6 +76,9 @@ async def render_taki_appad(
     else:
         dm_data_url = ""
 
+    # Logo — embedded as base64 so set_content() can reference it without a server
+    logo_url = _load_logo_data_url()
+
     # Render Jinja2 template
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -59,6 +88,7 @@ async def render_taki_appad(
     html = template.render(
         dm_screenshot_url=dm_data_url,
         next_message=next_message or "Stuur dit berichtje 👇",
+        logo_url=logo_url,
     )
 
     # Use the shared Playwright browser

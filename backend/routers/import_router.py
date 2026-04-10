@@ -558,12 +558,10 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
                 if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
             ]
 
-            # ── DM screenshot: second-to-last DM before this slot ────────
-            # Fall back to the only DM if there is just one.
-            _screenshot_src = (
-                _dm_before[-2] if len(_dm_before) >= 2 else
-                _dm_before[-1] if _dm_before else None
-            )
+            # ── DM screenshot: LAST DM slide before this slot ────────────
+            # The last DM before the app_ad contains the most up-to-date
+            # conversation snapshot with all messages visible so far.
+            _screenshot_src = _dm_before[-1] if _dm_before else None
             _dm_png: Optional[bytes] = None
             if _screenshot_src:
                 _cached = (

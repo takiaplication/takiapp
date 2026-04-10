@@ -235,15 +235,20 @@ async def classify_frame_ai(image_path: str) -> FrameType:
 _MEME_CATEGORY_PROMPT = (
     "Look at this image carefully. It is a meme or video clip used in a social-media reel about dating / rizz.\n\n"
     "Classify it into ONE of these 4 categories:\n\n"
-    "sport          — A clean sports fragment: someone doing sport, an athletic move, a game highlight, "
-    "fitness clip.\n\n"
+    "shoot_our_shot — HIGHEST PRIORITY. An athlete or player physically SHOOTING, KICKING, or SCORING "
+    "in a sport: a basketball shot, a football/soccer goal kick, a tennis serve, a golf swing, "
+    "or any clip of someone literally launching a ball toward a target. "
+    "Often has a percentage indicator (e.g. '1%', '0.1%') or an arrow showing the ball's path. "
+    "The metaphor = sending a bold DM / taking a romantic risk. "
+    "This is NOT generic sport — it must show the actual shooting/kicking/scoring moment.\n\n"
+    "sport          — Generic athletic content that does NOT show a shooting/scoring moment: "
+    "running, dribbling, training, a team huddle, a gym workout, a celebration after scoring, "
+    "a player portrait, etc.\n\n"
     "coocked        — Things are going badly / an awkward or cringe moment in the conversation. "
     "The guy looks embarrassed, nervous, or the reply was bad.\n\n"
     "cooking        — Things are going very well / a smooth or confident moment, conversation is on fire. "
     "The guy looks cool, confident, winning.\n\n"
-    "shoot_our_shot — A bold, daring, or risky message was just sent; taking a big shot, "
-    "will it land?\n\n"
-    "Reply with ONLY one word:  sport   OR   coocked   OR   cooking   OR   shoot_our_shot"
+    "Reply with ONLY one word:  shoot_our_shot   OR   sport   OR   coocked   OR   cooking"
 )
 
 
