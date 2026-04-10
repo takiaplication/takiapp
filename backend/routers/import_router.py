@@ -581,15 +581,22 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
                         _conv, jitter=_make_jitter(_conv.theme)
                     )
 
-            # ── Next message: first translated message of last DM before slot ──
+            # ── Next message: first translated message of first DM AFTER the slot ──
+            # The blue Taki bubble is a "suggested reply" — it shows what to send
+            # NEXT, so we read the first message from the first DM slide that
+            # follows this app_ad in the ordered list.
+            _dm_after = [
+                s for s in all_ordered[_slot_idx + 1:]
+                if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
+            ]
             _next_msg = ""
-            if _dm_before:
-                _last_dm = _dm_before[-1]
+            if _dm_after:
+                _next_dm = _dm_after[0]
                 _db_msg = await get_db()
                 try:
                     _msg_row = await (await _db_msg.execute(
                         "SELECT text FROM messages WHERE slide_id=? ORDER BY sort_order LIMIT 1",
-                        (_last_dm["id"],),
+                        (_next_dm["id"],),
                     )).fetchone()
                     if _msg_row and _msg_row["text"]:
                         _next_msg = _msg_row["text"]

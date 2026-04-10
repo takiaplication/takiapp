@@ -114,12 +114,14 @@ body {
 }
 
 .dm-screenshot img {
-    width: 100%;
+    /* Use contain so the full portrait DM is always visible.
+       The DM has a black background that blends with the card's dark bg. */
+    width: auto;
     height: 100%;
-    object-fit: cover;
-    /* show bottom of the DM — the latest messages */
-    object-position: center bottom;
+    max-width: 100%;
+    object-fit: contain;
     display: block;
+    margin: 0 auto;
 }
 
 .dm-screenshot-empty {
