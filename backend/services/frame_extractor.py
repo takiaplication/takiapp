@@ -1,10 +1,8 @@
 """
-Stage 1: Extract frames from a video at 4 fps (every 250 ms).
+Stage 1: Extract frames from a video at 2 fps (every 500 ms).
 
-Sampling at 250 ms guarantees we never miss a slide — even one shown for
-only half a second gets at least 2 samples.  Deduplication (stage 2) runs
-afterwards in the import router and collapses the over-sampled frames into
-exactly the unique slides that appear in the video.
+Sampling at 500 ms gives one frame per half-second; duplicates are handled
+downstream via text-fingerprint dedup after OCR (no visual dedup).
 """
 
 import asyncio
@@ -15,8 +13,8 @@ from typing import List, Optional, Callable
 from config import PROJECTS_DIR
 
 # Sample every SAMPLE_MS milliseconds.
-# 250 ms = 4 fps  →  a 60-second video → up to 240 raw samples before dedup.
-SAMPLE_MS = 250
+# 333 ms ≈ 3 fps  →  a 60-second video → up to 180 raw samples.
+SAMPLE_MS = 333
 
 
 async def extract_scenes(

@@ -41,7 +41,7 @@ async def list_slides(project_id: str):
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT * FROM slides WHERE project_id=? ORDER BY sort_order",
+            "SELECT * FROM slides WHERE project_id=? AND is_active=1 ORDER BY sort_order",
             (project_id,),
         )
         rows = await cursor.fetchall()
