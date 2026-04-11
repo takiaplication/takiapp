@@ -190,13 +190,31 @@ async def _start_export_job(project_id: str) -> str:
             progress_callback=_compose_progress,
         )
 
+        # Extract first-frame thumbnail from the finished MP4
+        thumb_path = str(PROJECTS_DIR / project_id / "thumbnail.jpg")
+        try:
+            thumb_proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y",
+                "-i", str(output_path),
+                "-vframes", "1",
+                "-q:v", "3",
+                thumb_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await thumb_proc.wait()
+            if not Path(thumb_path).exists():
+                thumb_path = None  # ffmpeg failed silently — carry on
+        except Exception:
+            thumb_path = None
+
         # Mark project as 'library' once export succeeds
         db_done = await get_db()
         try:
             await db_done.execute(
                 """UPDATE projects SET status='library', pipeline_step='Export klaar',
-                   updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                (project_id,),
+                   thumbnail_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                (thumb_path, project_id),
             )
             await db_done.commit()
         finally:

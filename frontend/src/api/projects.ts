@@ -216,6 +216,21 @@ export async function saveClipToLibrary(
   return res.data
 }
 
+// --- Library ---
+
+export interface LibraryItem {
+  id: string
+  name: string
+  created_at: string
+  thumbnail_url: string | null
+  download_url: string
+}
+
+export async function getLibrary(): Promise<LibraryItem[]> {
+  const res = await api.get('/library')
+  return res.data
+}
+
 // --- Auto-pipeline ---
 
 export async function submitPipeline(urls: string[]): Promise<{ project_ids: string[]; queued: number }> {

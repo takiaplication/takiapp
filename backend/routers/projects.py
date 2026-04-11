@@ -1,12 +1,24 @@
 import uuid
 import shutil
+from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from database import get_db
-from config import PROJECTS_DIR
-from schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
+from config import PROJECTS_DIR, STORAGE_DIR
+from schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, LibraryItem
 
 router = APIRouter(tags=["projects"])
+
+
+def _thumb_to_url(thumb_path: str | None) -> str | None:
+    """Convert an absolute thumbnail_path to a /files/… URL."""
+    if not thumb_path or not Path(thumb_path).exists():
+        return None
+    try:
+        rel = Path(thumb_path).relative_to(STORAGE_DIR)
+        return f"/files/{rel.as_posix()}"
+    except ValueError:
+        return None
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
@@ -101,3 +113,34 @@ async def delete_project(project_id: str):
         shutil.rmtree(project_dir)
 
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Library — all completed (status='library') projects
+# ---------------------------------------------------------------------------
+
+@router.get("/library", response_model=list[LibraryItem])
+async def list_library():
+    """Return every project with status='library', newest first."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id, name, created_at, thumbnail_path
+               FROM projects
+               WHERE status='library'
+               ORDER BY created_at DESC""",
+        )
+        rows = await cursor.fetchall()
+    finally:
+        await db.close()
+
+    return [
+        LibraryItem(
+            id=r["id"],
+            name=r["name"],
+            created_at=r["created_at"],
+            thumbnail_url=_thumb_to_url(r["thumbnail_path"] if "thumbnail_path" in r.keys() else None),
+            download_url=f"/api/projects/{r['id']}/export/download",
+        )
+        for r in rows
+    ]

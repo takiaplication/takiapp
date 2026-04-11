@@ -101,6 +101,7 @@ async def init_db():
             ("projects", "video_path", "TEXT"),
             ("projects", "pipeline_step", "TEXT"),
             ("projects", "pipeline_error", "TEXT"),
+            ("projects", "thumbnail_path", "TEXT"),
         ]
         for table, col, definition in migrations:
             try:

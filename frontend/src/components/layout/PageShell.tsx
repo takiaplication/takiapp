@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import SettingsModal from '../shared/SettingsModal'
 
 interface Props {
@@ -8,15 +8,41 @@ interface Props {
 
 export default function PageShell({ children }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const { pathname } = useLocation()
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="h-14 border-b border-zinc-800 flex items-center px-6">
-        <h1 className="text-lg font-semibold tracking-tight flex-1">
+      <header className="h-14 border-b border-zinc-800 flex items-center px-6 gap-6">
+        <h1 className="text-lg font-semibold tracking-tight">
           <Link to="/" className="hover:opacity-80 transition-opacity">
             <span className="text-blue-500">Reel</span>Factory
           </Link>
         </h1>
+
+        {/* Main nav */}
+        <nav className="flex gap-1 flex-1">
+          <Link
+            to="/"
+            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+              pathname === '/'
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
+            }`}
+          >
+            Kanban
+          </Link>
+          <Link
+            to="/library"
+            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+              pathname === '/library'
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
+            }`}
+          >
+            🎬 Library
+          </Link>
+        </nav>
+
         <button
           onClick={() => setSettingsOpen(true)}
           className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-zinc-800"
