@@ -222,7 +222,24 @@ async def _start_export_job(project_id: str) -> str:
 
         return str(output_path)
 
-    await job_manager.submit(job_id, do_export)
+    async def do_export_with_error_capture(progress_callback):
+        try:
+            return await do_export(progress_callback)
+        except Exception as exc:
+            # Write error back to project so the Kanban card shows it
+            err_db = await get_db()
+            try:
+                await err_db.execute(
+                    """UPDATE projects SET status='error', pipeline_step='Export mislukt',
+                       pipeline_error=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                    (str(exc), project_id),
+                )
+                await err_db.commit()
+            finally:
+                await err_db.close()
+            raise
+
+    await job_manager.submit(job_id, do_export_with_error_capture)
     return job_id
 
 

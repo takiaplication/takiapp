@@ -254,6 +254,10 @@ export async function retryProject(projectId: string): Promise<void> {
   await api.post(`/projects/${projectId}/pipeline/retry`)
 }
 
+export async function reexportProject(projectId: string): Promise<void> {
+  await api.post(`/projects/${projectId}/reexport`)
+}
+
 // --- Global app settings ---
 
 export interface AppSettings {

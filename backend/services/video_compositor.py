@@ -122,7 +122,17 @@ async def compose_video(
         else:
             hold_duration = hold_ms / 1000.0
             frame_file = work_dir / f"frame_{frame_idx:06d}.png"
-            img = Image.open(slide_path)
+            img = Image.open(slide_path).convert("RGB")
+            # Normalise every image to 1080×1920 (black-bar pad if needed)
+            if img.size != (1080, 1920):
+                scale = 1080 / img.width
+                new_h = int(img.height * scale)
+                img = img.resize((1080, new_h), Image.LANCZOS)
+                canvas = Image.new("RGB", (1080, 1920), (0, 0, 0))
+                canvas.paste(img, (0, (1920 - new_h) // 2) if new_h < 1920 else (0, 0))
+                if new_h > 1920:
+                    canvas = canvas.crop((0, (new_h - 1920) // 2, 1080, (new_h - 1920) // 2 + 1920))
+                img = canvas
             img.save(str(frame_file))
             frame_entries.append(f"file '{frame_file.name}'\nduration {hold_duration}")
             frame_idx += 1
@@ -139,10 +149,20 @@ async def compose_video(
             and not is_video
             and not slides[i + 1].get("is_video", False)
         ):
-            # Load next slide's representative image
+            # Load next slide's representative image (always normalised to 1080×1920)
             next_rep = representative.get(i + 1)
             if next_rep is None:
-                next_rep = Image.open(slides[i + 1]["path"]).convert("RGBA")
+                _nxt = Image.open(slides[i + 1]["path"]).convert("RGB")
+                if _nxt.size != (1080, 1920):
+                    _scale = 1080 / _nxt.width
+                    _nh = int(_nxt.height * _scale)
+                    _nxt = _nxt.resize((1080, _nh), Image.LANCZOS)
+                    _canvas = Image.new("RGB", (1080, 1920), (0, 0, 0))
+                    _canvas.paste(_nxt, (0, (1920 - _nh) // 2) if _nh < 1920 else (0, 0))
+                    if _nh > 1920:
+                        _canvas = _canvas.crop((0, (_nh - 1920) // 2, 1080, (_nh - 1920) // 2 + 1920))
+                    _nxt = _canvas
+                next_rep = _nxt.convert("RGBA")
 
             img_a = representative[i]
             img_b = next_rep

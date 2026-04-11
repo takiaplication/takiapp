@@ -248,3 +248,29 @@ async def approve_project(project_id: str):
     await _start_export_job(project_id)
 
     return {"ok": True}
+
+
+@router.post("/projects/{project_id}/reexport")
+async def reexport_project(project_id: str):
+    """
+    Manually re-trigger export for a project stuck in 'approved' state.
+    Useful when the server was restarted mid-export.
+    """
+    from pathlib import Path  # noqa: PLC0415
+    from config import PROJECTS_DIR  # noqa: PLC0415
+    from routers.compositor import _start_export_job  # noqa: PLC0415
+
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT status FROM projects WHERE id=?", (project_id,)
+        )).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Project not found")
+    finally:
+        await db.close()
+
+    # Reset error state and restart export
+    await _set_status(project_id, "approved", "Video exporteren… (herstart)", "")
+    await _start_export_job(project_id)
+    return {"ok": True}

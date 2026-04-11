@@ -13,10 +13,39 @@ from routers import meme_library_router
 from routers import pipeline_router
 
 
+async def _recover_stuck_exports() -> None:
+    """
+    On startup: find any project stuck at status='approved' without a finished
+    output.mp4 and restart the export job so it completes automatically.
+    """
+    from database import get_db  # noqa: PLC0415
+    from config import PROJECTS_DIR  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+    from routers.compositor import _start_export_job  # noqa: PLC0415
+
+    db = await get_db()
+    try:
+        rows = await (await db.execute(
+            "SELECT id FROM projects WHERE status='approved'"
+        )).fetchall()
+    finally:
+        await db.close()
+
+    for row in rows:
+        pid = row["id"]
+        output = PROJECTS_DIR / pid / "output.mp4"
+        if not output.exists():
+            try:
+                await _start_export_job(pid)
+            except Exception:
+                pass  # will surface as error in the job
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await renderer.start()
+    await _recover_stuck_exports()
     yield
     await renderer.stop()
 

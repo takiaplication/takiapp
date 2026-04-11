@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listProjects, submitPipeline, retryProject, deleteProject } from '../api/projects'
+import { listProjects, submitPipeline, retryProject, reexportProject, deleteProject } from '../api/projects'
 import { getExportDownloadUrl } from '../api/projects'
 import type { Project } from '../types/project'
 
@@ -93,6 +93,12 @@ function ProjectCard({
     onRefresh()
   }
 
+  async function handleReexport(e: React.MouseEvent) {
+    e.stopPropagation()
+    await reexportProject(project.id)
+    onRefresh()
+  }
+
   async function handleDelete(e: React.MouseEvent) {
     e.stopPropagation()
     if (!confirm(`Project "${project.name}" verwijderen?`)) return
@@ -167,9 +173,21 @@ function ProjectCard({
       )}
 
       {project.status === 'approved' && (
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse flex-shrink-0" />
-          <span className="text-xs text-violet-300">Video exporteren…</span>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse flex-shrink-0" />
+            <span className="text-xs text-violet-300 truncate">
+              {project.pipeline_step || 'Video exporteren…'}
+            </span>
+          </div>
+          {/* Re-export button — shown when export may have been lost (no output yet) */}
+          <button
+            onClick={handleReexport}
+            className="w-full text-xs font-medium py-1.5 px-3 rounded-lg bg-violet-800/60
+                       hover:bg-violet-700 text-violet-200 transition-colors border border-violet-700/50"
+          >
+            🔄 Opnieuw exporteren
+          </button>
         </div>
       )}
 
