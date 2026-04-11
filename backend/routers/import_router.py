@@ -558,10 +558,31 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
                 if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
             ]
 
-            # ── DM screenshot: LAST DM slide before this slot ────────────
-            # The last DM before the app_ad contains the most up-to-date
-            # conversation snapshot with all messages visible so far.
-            _screenshot_src = _dm_before[-1] if _dm_before else None
+            # ── DM screenshot: last DM before this slot that has actual text ──
+            # Walk backwards so we always pick the most-recent DM that
+            # contains at least one non-empty message bubble.
+            # NEVER use a DM slide with no text at all (empty black screen).
+            _screenshot_src = None
+            for _candidate in reversed(_dm_before):
+                _db_chk = await get_db()
+                try:
+                    _chk = await (await _db_chk.execute(
+                        """SELECT COUNT(*) AS cnt FROM messages
+                           WHERE slide_id=? AND text IS NOT NULL AND trim(text) != ''""",
+                        (_candidate["id"],),
+                    )).fetchone()
+                    _has_text = (_chk["cnt"] if _chk else 0) > 0
+                finally:
+                    await _db_chk.close()
+                if _has_text:
+                    _screenshot_src = _candidate
+                    break
+
+            # If no DM with text exists before this slot, skip rendering entirely
+            if not _screenshot_src:
+                await progress_callback(0.98, f"App-ad {_slot['id'][:8]} overgeslagen — geen DM met tekst gevonden")
+                continue
+
             _dm_png: Optional[bytes] = None
             if _screenshot_src:
                 _cached = (
