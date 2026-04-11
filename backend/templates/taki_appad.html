@@ -64,6 +64,12 @@ html, body {
     width: auto;
     object-fit: contain;
     display: block;
+    background: none;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    padding: 0;
+    mix-blend-mode: multiply;   /* removes white bg if logo has one */
 }
 
 .plus-btn {
@@ -81,20 +87,19 @@ html, body {
 }
 
 /* ── WHITE CARD ───────────────────────────────────────────── */
-/* Takes all remaining vertical space between nav and bubble.
-   Width is 88 % of the 1000 px inner content area = 880 px.
-   The card is therefore wider than it is tall — matching the
-   reference screenshot — because the bubble is fixed-height. */
+/* Fixed 720 × 720 px square — leaves 176 px below for the
+   outgoing bubble (nav 88 + card 720 + margin 16 = 824; remaining 176).
+   Two lines of 36 px text + 48 px padding ≈ 149 px → fits with 19 px spare. */
 .white-card {
-    flex: 1;
-    min-height: 0;         /* allow flex child to shrink below content size */
-    width: 880px;          /* 88 % of inner 1000 px */
+    flex-shrink: 0;
+    width: 720px;
+    height: 720px;          /* explicit square — overrides any flex stretching */
     align-self: center;
     background: #ffffff;
     border-radius: 28px;
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.10);
     padding: 10px;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
     overflow: hidden;
 }
 
@@ -106,7 +111,7 @@ html, body {
     width: 100%;
     height: 100%;
     background: #000000;
-    border-radius: 20px;
+    border-radius: 18px;
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -137,6 +142,7 @@ html, body {
     flex-shrink: 0;
     align-self: flex-end;
     max-width: 800px;      /* 80 % of inner 1000 px */
+    margin-top: 8px;       /* breathing room above bubble */
     background: #29AEFF;
     color: #ffffff;
     font-size: 36px;
