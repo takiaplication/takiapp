@@ -2,7 +2,6 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=1080, height=1920">
 <style>
 * {
     margin: 0;
@@ -12,166 +11,142 @@
 
 html, body {
     width: 1080px;
-    height: 1920px;
+    height: 1080px;
     overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display',
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display',
                  'Helvetica Neue', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
 }
 
-body {
-    background: linear-gradient(180deg, #e8f4ff 0%, #c8e8ff 100%);
+/* ── CANVAS ───────────────────────────────────────────────── */
+.canvas {
+    width: 1080px;
+    height: 1080px;
+    background: linear-gradient(180deg, #B8D9F5 0%, #F0F4FF 100%);
+    padding: 40px;
     display: flex;
     flex-direction: column;
-    align-items: center;
+    box-sizing: border-box;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   HEADER — pink back-arrow  |  Taki logo/text  |  pink + circle
-   ─────────────────────────────────────────────────────────── */
-.header {
-    width: 1080px;
-    height: 186px;
+/* ── NAV BAR ──────────────────────────────────────────────── */
+.nav-bar {
     flex-shrink: 0;
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 0 56px;
+    align-items: center;
+    height: 68px;
+    margin-bottom: 20px;
 }
 
 .back-arrow {
-    width: 80px;
-    height: 80px;
+    font-size: 28px;
+    font-weight: 700;
+    color: #2D2D2D;
+    line-height: 1;
+    width: 48px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-size: 68px;
-    font-weight: 400;
-    color: #FF4D8D;
-    line-height: 1;
-    padding-bottom: 4px;
 }
 
-/* "Taki" text — only shown when the logo image is unavailable */
+/* Taki text — fallback when logo image is unavailable */
 .app-title {
-    font-size: 120px;
-    font-weight: 900;
-    color: #FF4D8D;
-    letter-spacing: -2px;
+    font-size: 36px;
+    font-weight: 800;
+    color: #FF4FA3;
+    letter-spacing: -0.5px;
     line-height: 1;
 }
 
-/* Logo image */
+/* Logo image — matches visual weight of text fallback */
 .logo-img {
-    height: 96px;
+    height: 52px;
     width: auto;
     object-fit: contain;
     display: block;
 }
 
 .plus-btn {
-    width: 80px;
-    height: 80px;
-    background: #FF4D8D;
+    width: 48px;
+    height: 48px;
+    background: #FF4FA3;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
-    font-size: 50px;
-    font-weight: 300;
+    font-size: 26px;
+    font-weight: 400;
     line-height: 1;
-    padding-bottom: 3px;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   SPACER between header and frame
-   ─────────────────────────────────────────────────────────── */
-.spacer-top {
-    height: 40px;
-    flex-shrink: 0;
+/* ── WHITE CARD ───────────────────────────────────────────── */
+/* Takes all remaining vertical space between nav and bubble.
+   Width is 88 % of the 1000 px inner content area = 880 px.
+   The card is therefore wider than it is tall — matching the
+   reference screenshot — because the bubble is fixed-height. */
+.white-card {
+    flex: 1;
+    min-height: 0;         /* allow flex child to shrink below content size */
+    width: 880px;          /* 88 % of inner 1000 px */
+    align-self: center;
+    background: #ffffff;
+    border-radius: 28px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.10);
+    padding: 10px;
+    margin-bottom: 24px;
+    overflow: hidden;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   PHONE MOCKUP — 1 : 1 square, 85 % of screen width = 918 px
-   Thick white border (14 px) + large radius (36 px) matches
-   the card look in the reference screenshot.
-   The DM PNG is pre-cropped to the bubble bounding-box so the
-   frame shows actual conversation instead of a black void.
-   ─────────────────────────────────────────────────────────── */
-.phone-section {
-    flex-shrink: 0;
+/* ── INNER BLACK AREA ─────────────────────────────────────── */
+/* Fills the white card with a 10 px white "frame" visible
+   around all four edges.  The cropped DM PNG is embedded here
+   with object-fit: contain so no bubble is cut off.          */
+.black-inner {
+    width: 100%;
+    height: 100%;
+    background: #000000;
+    border-radius: 20px;
+    overflow: hidden;
     display: flex;
+    align-items: center;
     justify-content: center;
 }
 
-.phone-frame {
-    width: 918px;
-    height: 918px;
-    background: #000;
-    border: 14px solid white;
-    border-radius: 36px;
-    overflow: hidden;
-    box-shadow:
-        0 20px 60px rgba(30, 80, 200, 0.18),
-        0  6px 20px rgba(20, 60, 160, 0.12);
-}
-
-.phone-frame img {
+.black-inner img {
     width: 100%;
     height: 100%;
     object-fit: contain;
     display: block;
 }
 
-.phone-frame-empty {
+.black-inner-empty {
     width: 100%;
     height: 100%;
-    background: #1a1a1a;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #444;
-    font-size: 96px;
+    color: #333;
+    font-size: 64px;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   FLEXIBLE GAP — pushes bubble to the last ~28 %
-   ─────────────────────────────────────────────────────────── */
-.gap {
-    flex: 1;
-    min-height: 40px;
-}
-
-/* ═══════════════════════════════════════════════════════════
-   BOTTOM ZONE — just the blue rounded-rect bubble, centred
-   ─────────────────────────────────────────────────────────── */
-.bottom-zone {
-    height: 520px;
+/* ── OUTGOING BUBBLE ──────────────────────────────────────── */
+/* Sits on the gradient background below the white card.
+   Aligned to the right edge of the canvas content area.      */
+.outgoing-bubble {
     flex-shrink: 0;
-    width: 1080px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 0 80px 80px;
-}
-
-/* Blue rounded-rectangle bubble — matches reference screenshot.
-   NOT a pill: border-radius 48 px gives the card-style corners. */
-.ai-bubble {
-    width: 918px;
-    background: #2196F3;
-    border-radius: 48px;
-    padding: 56px 64px;
-    color: white;
-    font-size: 56px;
-    font-weight: 700;
+    align-self: flex-end;
+    max-width: 800px;      /* 80 % of inner 1000 px */
+    background: #29AEFF;
+    color: #ffffff;
+    font-size: 36px;
+    font-weight: 600;
     line-height: 1.4;
-    text-align: left;
+    border-radius: 22px;
+    padding: 24px 32px;
     word-break: break-word;
 
-    /* cap at 3 lines so the bubble never overflows the zone */
+    /* cap at 3 lines so bubble never overflows canvas */
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -180,39 +155,33 @@ body {
 </style>
 </head>
 <body>
+<div class="canvas">
 
-<!-- HEADER -->
-<div class="header">
-    <div class="back-arrow">&#8249;</div>
-    {% if logo_url %}
-        <img src="{{ logo_url }}" class="logo-img" alt="Taki" />
-    {% else %}
-        <div class="app-title">Taki</div>
-    {% endif %}
-    <div class="plus-btn">+</div>
-</div>
-
-<!-- SPACER -->
-<div class="spacer-top"></div>
-
-<!-- PHONE MOCKUP -->
-<div class="phone-section">
-    <div class="phone-frame">
-        {% if dm_screenshot_url %}
-            <img src="{{ dm_screenshot_url }}" alt="DM screenshot" />
+    <!-- NAV BAR -->
+    <div class="nav-bar">
+        <span class="back-arrow">&#8249;</span>
+        {% if logo_url %}
+            <img src="{{ logo_url }}" class="logo-img" alt="Taki" />
         {% else %}
-            <div class="phone-frame-empty">💬</div>
+            <span class="app-title">Taki</span>
         {% endif %}
+        <div class="plus-btn">+</div>
     </div>
+
+    <!-- WHITE CARD with cropped DM screenshot inside -->
+    <div class="white-card">
+        <div class="black-inner">
+            {% if dm_screenshot_url %}
+                <img src="{{ dm_screenshot_url }}" alt="DM screenshot" />
+            {% else %}
+                <div class="black-inner-empty">💬</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- OUTGOING BUBBLE (suggested reply / next message) -->
+    <div class="outgoing-bubble">{{ next_message }}</div>
+
 </div>
-
-<!-- ELASTIC GAP -->
-<div class="gap"></div>
-
-<!-- BOTTOM ZONE: blue rounded-rect bubble only -->
-<div class="bottom-zone">
-    <div class="ai-bubble">{{ next_message }}</div>
-</div>
-
 </body>
 </html>

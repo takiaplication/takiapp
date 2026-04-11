@@ -129,7 +129,7 @@ async def render_taki_appad(
 
     Returns
     -------
-    bytes  — raw PNG bytes of the rendered 1080×1920 slide.
+    bytes  — raw PNG bytes of the rendered 1080×1080 slide.
     """
     # Crop the DM screenshot to the bubble bounding box before embedding.
     # The full 1080×1920 PNG has a large empty area below the messages; removing
@@ -158,7 +158,7 @@ async def render_taki_appad(
 
     # Use the shared Playwright browser
     context = await renderer_instance._browser.new_context(
-        viewport={"width": 1080, "height": 1920},
+        viewport={"width": 1080, "height": 1080},
         device_scale_factor=1,
     )
     try:
