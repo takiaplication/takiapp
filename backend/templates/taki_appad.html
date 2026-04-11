@@ -18,7 +18,10 @@ html, body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* ── CANVAS ───────────────────────────────────────────────── */
+/* ── CANVAS ───────────────────────────────────────────────────────────
+   Full 1080×1080 square. 40 px padding on all sides = 1000×1000 inner.
+   Column of: nav (120px) → card (450px) → gap → bubble.
+   ──────────────────────────────────────────────────────────────────── */
 .canvas {
     width: 1080px;
     height: 1080px;
@@ -26,41 +29,43 @@ html, body {
     padding: 40px;
     display: flex;
     flex-direction: column;
-    box-sizing: border-box;
+    overflow: hidden;
 }
 
-/* ── NAV BAR ──────────────────────────────────────────────── */
+/* ── NAV BAR — ~120 px tall ────────────────────────────────────────── */
 .nav-bar {
     flex-shrink: 0;
+    height: 120px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    height: 68px;
-    margin-bottom: 20px;
+    margin-bottom: 28px;
 }
 
+/* Large pink back-arrow — matches reference color & size */
 .back-arrow {
-    font-size: 28px;
-    font-weight: 700;
-    color: #2D2D2D;
+    width: 60px;
+    font-size: 68px;
+    font-weight: 400;
+    color: #FF4FA3;
     line-height: 1;
-    width: 48px;
     display: flex;
     align-items: center;
+    padding-bottom: 6px;   /* optical vertical centering of ‹ */
 }
 
-/* Taki text — fallback when logo image is unavailable */
+/* "Taki" fallback text — only shown when logo is absent */
 .app-title {
-    font-size: 36px;
-    font-weight: 800;
+    font-size: 80px;
+    font-weight: 900;
     color: #FF4FA3;
-    letter-spacing: -0.5px;
+    letter-spacing: -1.5px;
     line-height: 1;
 }
 
-/* Logo image — matches visual weight of text fallback */
+/* Logo image — height matches the visual weight of .app-title */
 .logo-img {
-    height: 52px;
+    height: 72px;
     width: auto;
     object-fit: contain;
     display: block;
@@ -69,44 +74,42 @@ html, body {
     outline: none;
     box-shadow: none;
     padding: 0;
-    mix-blend-mode: multiply;   /* removes white bg if logo has one */
+    mix-blend-mode: multiply;   /* removes white bg if logo has it */
 }
 
+/* Large pink "+" circle */
 .plus-btn {
-    width: 48px;
-    height: 48px;
+    width: 72px;
+    height: 72px;
     background: #FF4FA3;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: white;
-    font-size: 26px;
-    font-weight: 400;
+    color: #ffffff;
+    font-size: 40px;
+    font-weight: 300;
     line-height: 1;
+    padding-bottom: 2px;
 }
 
-/* ── WHITE CARD ───────────────────────────────────────────── */
-/* Fixed 720 × 720 px square — leaves 176 px below for the
-   outgoing bubble (nav 88 + card 720 + margin 16 = 824; remaining 176).
-   Two lines of 36 px text + 48 px padding ≈ 149 px → fits with 19 px spare. */
+/* ── WHITE CARD — landscape rectangle, ~45 % of canvas height ─────────
+   1000 px wide (full inner) × 450 px tall.
+   10 px white padding creates the visible "picture frame" effect.
+   ──────────────────────────────────────────────────────────────────── */
 .white-card {
     flex-shrink: 0;
-    width: 720px;
-    height: 720px;          /* explicit square — overrides any flex stretching */
-    align-self: center;
+    width: 100%;
+    height: 450px;
     background: #ffffff;
     border-radius: 28px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.10);
-    padding: 10px;
-    margin-bottom: 16px;
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.12);
+    padding: 12px;
+    margin-bottom: 48px;
     overflow: hidden;
 }
 
-/* ── INNER BLACK AREA ─────────────────────────────────────── */
-/* Fills the white card with a 10 px white "frame" visible
-   around all four edges.  The cropped DM PNG is embedded here
-   with object-fit: contain so no bubble is cut off.          */
+/* ── INNER BLACK AREA — fills white card with frame visible ──────────── */
 .black-inner {
     width: 100%;
     height: 100%;
@@ -131,28 +134,30 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #333;
-    font-size: 64px;
+    color: #444;
+    font-size: 80px;
 }
 
-/* ── OUTGOING BUBBLE ──────────────────────────────────────── */
-/* Sits on the gradient background below the white card.
-   Aligned to the right edge of the canvas content area.      */
+/* ── OUTGOING BUBBLE (suggested reply / next message) ─────────────────
+   Right-aligned, ~84 % of inner width. Large bold white text on sky blue.
+   Layout math: 40+120+28+450+48 = 686px consumed from top.
+   Remaining inner: 1000-686 = 314px for bubble + bottom breathing room.
+   2 lines × 48px × 1.35 + 80px padding ≈ 210px  →  fits with 104px spare.
+   ──────────────────────────────────────────────────────────────────── */
 .outgoing-bubble {
     flex-shrink: 0;
     align-self: flex-end;
-    max-width: 800px;      /* 80 % of inner 1000 px */
-    margin-top: 8px;       /* breathing room above bubble */
+    max-width: 840px;       /* 84 % of inner 1000 px */
     background: #29AEFF;
     color: #ffffff;
-    font-size: 36px;
-    font-weight: 600;
-    line-height: 1.4;
-    border-radius: 22px;
-    padding: 24px 32px;
+    font-size: 48px;
+    font-weight: 700;
+    line-height: 1.35;
+    border-radius: 36px;
+    padding: 40px 48px;
     word-break: break-word;
 
-    /* cap at 3 lines so bubble never overflows canvas */
+    /* cap at 3 lines — never overflows canvas */
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -174,7 +179,7 @@ html, body {
         <div class="plus-btn">+</div>
     </div>
 
-    <!-- WHITE CARD with cropped DM screenshot inside -->
+    <!-- WHITE CARD: landscape rectangle with black inner + DM screenshot -->
     <div class="white-card">
         <div class="black-inner">
             {% if dm_screenshot_url %}
@@ -185,7 +190,7 @@ html, body {
         </div>
     </div>
 
-    <!-- OUTGOING BUBBLE (suggested reply / next message) -->
+    <!-- OUTGOING BUBBLE — suggested reply shown below the card -->
     <div class="outgoing-bubble">{{ next_message }}</div>
 
 </div>
