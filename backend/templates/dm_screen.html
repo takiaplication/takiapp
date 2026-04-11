@@ -55,12 +55,12 @@ body {
     flex-direction: column;
 }
 
-/* ===== MESSAGE AREA — fills full canvas, vertically centered ===== */
+/* ===== MESSAGE AREA — bubbles sit at the bottom ===== */
 .messages {
     flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-end;
     padding: 60px var(--j-msg-x, 42px) 80px;
     overflow: hidden;
     gap: 0;
@@ -128,7 +128,7 @@ body {
 /* ===== BUBBLES ===== */
 .bubble {
     max-width: 75%;
-    padding: var(--j-pad-v, 27px) var(--j-pad-h, 36px);
+    padding: var(--j-pad-v, 18px) var(--j-pad-h, 24px);
     font-size: var(--j-font, 48px);
     line-height: var(--j-lh, 1.35);
     word-wrap: break-word;
