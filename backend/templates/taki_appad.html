@@ -27,8 +27,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   HEADER — top 8 % → taller to fit the large Taki title
-   186 px keeps "Taki" optically centred with generous breathing room
+   HEADER — pink back-arrow  |  Taki logo/text  |  pink + circle
    ─────────────────────────────────────────────────────────── */
 .header {
     width: 1080px;
@@ -62,7 +61,7 @@ body {
     line-height: 1;
 }
 
-/* Logo image — sized to match the visual weight of the text fallback */
+/* Logo image */
 .logo-img {
     height: 96px;
     width: auto;
@@ -86,9 +85,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   SPACER — header 186 px + spacer 40 px = 226 px from top.
-   Phone (700 px tall) center = 226 + 350 = 576 px = 30 % of 1920
-   → mockup is vertically centred inside the top-60 % zone.
+   SPACER between header and frame
    ─────────────────────────────────────────────────────────── */
 .spacer-top {
     height: 40px;
@@ -97,11 +94,10 @@ body {
 
 /* ═══════════════════════════════════════════════════════════
    PHONE MOCKUP — 1 : 1 square, 85 % of screen width = 918 px
-   The DM PNG is pre-cropped to the bubble bounding-box + 40 px
-   padding before being embedded, so object-fit:contain fills the
-   square cleanly without a large black void.
-   Dark frame background (#111) makes any thin letterbox bars
-   invisible for dark-mode DMs.
+   Thick white border (14 px) + large radius (36 px) matches
+   the card look in the reference screenshot.
+   The DM PNG is pre-cropped to the bubble bounding-box so the
+   frame shows actual conversation instead of a black void.
    ─────────────────────────────────────────────────────────── */
 .phone-section {
     flex-shrink: 0;
@@ -110,21 +106,20 @@ body {
 }
 
 .phone-frame {
-    width: 918px;        /* 85 % of 1080 */
-    height: 918px;       /* 1 : 1 square  */
-    background: #111;    /* dark bg — letterbox bars invisible on dark DMs */
-    border: 8px solid white;
-    border-radius: 24px;
+    width: 918px;
+    height: 918px;
+    background: #000;
+    border: 14px solid white;
+    border-radius: 36px;
     overflow: hidden;
     box-shadow:
-        0 16px 48px rgba(30, 80, 200, 0.16),
-        0  4px 16px rgba(20, 60, 160, 0.10);
+        0 20px 60px rgba(30, 80, 200, 0.18),
+        0  6px 20px rgba(20, 60, 160, 0.12);
 }
 
 .phone-frame img {
     width: 100%;
     height: 100%;
-    /* contain: full cropped DM always visible; thin bars blend with frame */
     object-fit: contain;
     display: block;
 }
@@ -141,55 +136,44 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   FLEXIBLE GAP — pushes the bottom zone to the last 25 %
+   FLEXIBLE GAP — pushes bubble to the last ~28 %
    ─────────────────────────────────────────────────────────── */
 .gap {
     flex: 1;
-    min-height: 48px;
+    min-height: 40px;
 }
 
 /* ═══════════════════════════════════════════════════════════
-   BOTTOM ZONE — last 25 % = 480 px
-   Stack: tap-to-copy hint  →  blue pill bubble  →  pad
+   BOTTOM ZONE — just the blue rounded-rect bubble, centred
    ─────────────────────────────────────────────────────────── */
 .bottom-zone {
-    height: 480px;
+    height: 520px;
     flex-shrink: 0;
     width: 1080px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 0 80px 72px;
-    gap: 28px;
+    padding: 0 80px 80px;
 }
 
-/* "tap to copy" sits ABOVE the bubble, centred */
-.tap-copy {
-    color: #A0A0A0;
-    font-size: 36px;
-    font-weight: 400;
-    letter-spacing: 0.2px;
-    text-align: center;
-    width: 100%;
-}
-
-/* Blue pill bubble — 85 % of 1080 px = 918 px wide */
+/* Blue rounded-rectangle bubble — matches reference screenshot.
+   NOT a pill: border-radius 48 px gives the card-style corners. */
 .ai-bubble {
-    width: 918px;          /* 85 % of 1080 */
+    width: 918px;
     background: #2196F3;
-    border-radius: 999px;  /* fully rounded pill */
-    padding: 40px 56px;
+    border-radius: 48px;
+    padding: 56px 64px;
     color: white;
-    font-size: 52px;
+    font-size: 56px;
     font-weight: 700;
     line-height: 1.4;
     text-align: left;
     word-break: break-word;
 
-    /* cap at 2 lines so the bubble never overflows the zone */
+    /* cap at 3 lines so the bubble never overflows the zone */
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -208,7 +192,7 @@ body {
     <div class="plus-btn">+</div>
 </div>
 
-<!-- GAP: header bottom → 15 % mark -->
+<!-- SPACER -->
 <div class="spacer-top"></div>
 
 <!-- PHONE MOCKUP -->
@@ -225,9 +209,8 @@ body {
 <!-- ELASTIC GAP -->
 <div class="gap"></div>
 
-<!-- BOTTOM ZONE: tap-to-copy + blue bubble -->
+<!-- BOTTOM ZONE: blue rounded-rect bubble only -->
 <div class="bottom-zone">
-    <div class="tap-copy">tap to copy</div>
     <div class="ai-bubble">{{ next_message }}</div>
 </div>
 
