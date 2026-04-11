@@ -14,9 +14,12 @@ from routers.renderer import _build_conversation_for_slide
 router = APIRouter(tags=["compositor"])
 
 
-@router.post("/projects/{project_id}/export")
-async def export_video(project_id: str):
-    """Start video composition. Auto-renders missing DM/meme slides. Returns job_id."""
+async def _start_export_job(project_id: str) -> str:
+    """
+    Core export helper — creates the job, submits it, returns job_id.
+    Callable from pipeline_router (approve) as well as the HTTP endpoint.
+    On success sets project status='library'.
+    """
     job_id = await job_manager.create_job(project_id, "export")
 
     async def do_export(progress_callback):
@@ -187,9 +190,28 @@ async def export_video(project_id: str):
             progress_callback=_compose_progress,
         )
 
+        # Mark project as 'library' once export succeeds
+        db_done = await get_db()
+        try:
+            await db_done.execute(
+                """UPDATE projects SET status='library', pipeline_step='Export klaar',
+                   updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                (project_id,),
+            )
+            await db_done.commit()
+        finally:
+            await db_done.close()
+
         return str(output_path)
 
     await job_manager.submit(job_id, do_export)
+    return job_id
+
+
+@router.post("/projects/{project_id}/export")
+async def export_video(project_id: str):
+    """Start video composition. Auto-renders missing DM/meme slides. Returns job_id."""
+    job_id = await _start_export_job(project_id)
     return {"job_id": job_id}
 
 

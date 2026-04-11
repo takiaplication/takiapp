@@ -1,7 +1,19 @@
+export type KanbanStatus =
+  | 'queue'
+  | 'processing'
+  | 'error'
+  | 'review'
+  | 'approved'
+  | 'library'
+  | 'created'     // legacy — treated as queue
+
 export interface Project {
   id: string
   name: string
-  status: string
+  status: KanbanStatus | string
+  source_url: string | null
+  pipeline_step: string | null
+  pipeline_error: string | null
   created_at: string
   updated_at: string
 }

@@ -216,6 +216,21 @@ export async function saveClipToLibrary(
   return res.data
 }
 
+// --- Auto-pipeline ---
+
+export async function submitPipeline(urls: string[]): Promise<{ project_ids: string[]; queued: number }> {
+  const res = await api.post('/pipeline', { urls })
+  return res.data
+}
+
+export async function approveProject(projectId: string): Promise<void> {
+  await api.post(`/projects/${projectId}/approve`)
+}
+
+export async function retryProject(projectId: string): Promise<void> {
+  await api.post(`/projects/${projectId}/pipeline/retry`)
+}
+
 // --- Global app settings ---
 
 export interface AppSettings {

@@ -10,6 +10,7 @@ from routers import projects, slides, messages, renderer as renderer_router, job
 from routers import import_router
 from routers import app_settings as app_settings_router
 from routers import meme_library_router
+from routers import pipeline_router
 
 
 @asynccontextmanager
@@ -43,3 +44,4 @@ app.include_router(compositor.router, prefix="/api")
 app.include_router(import_router.router, prefix="/api")
 app.include_router(app_settings_router.router, prefix="/api")
 app.include_router(meme_library_router.router, prefix="/api")
+app.include_router(pipeline_router.router, prefix="/api")

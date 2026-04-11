@@ -93,6 +93,114 @@ async def import_url(project_id: str, body: ImportUrlRequest):
 # Frame extraction
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Standalone pipeline helpers (called by both route handlers and pipeline_router)
+# ---------------------------------------------------------------------------
+
+async def run_extract_pipeline(project_id: str, video_path: str, progress_callback) -> dict:
+    """Core frame-extraction + classification logic, usable outside the HTTP layer."""
+    # ── STAGE 1 (0–40 %): capture one frame every 500 ms (2 fps) ─────────
+    async def _prog1(p: float, msg: str):
+        await progress_callback(p * 0.40, msg)
+
+    raw_frames = await extract_scenes(
+        video_path, project_id,
+        progress_callback=_prog1,
+    )
+    await progress_callback(0.40, f"Stage 1 done — {len(raw_frames)} raw samples captured")
+
+    # ── STAGE 2 (40–95 %): AI classify every frame ────────────────────────
+    await progress_callback(0.40, "Stage 2 — classifying all frames with AI…")
+    classified: list[tuple[str, str]] = []
+
+    for i, fp in enumerate(raw_frames):
+        ftype = await classify_frame_ai(fp)
+        classified.append((fp, ftype))
+        await progress_callback(
+            0.40 + 0.55 * (i + 1) / max(len(raw_frames), 1),
+            f"Classified {i + 1}/{len(raw_frames)}: {ftype}",
+        )
+
+    await progress_callback(0.95, f"Stage 2 done — {len(classified)} frames classified")
+
+    # ── STAGE 3 (95–99 %): collapse consecutive meme runs + dedup app_ad ──
+    collapsed: list[tuple[str, str]] = []
+    in_meme_run = False
+    app_ad_seen = False
+
+    for fp, ftype in classified:
+        if ftype == "meme":
+            if not in_meme_run:
+                in_meme_run = True
+                collapsed.append((fp, "meme"))
+        else:
+            if in_meme_run:
+                in_meme_run = False
+            if ftype == "app_ad":
+                if not app_ad_seen:
+                    collapsed.append((fp, "app_ad"))
+                    app_ad_seen = True
+            else:  # dm
+                collapsed.append((fp, ftype))
+
+    meme_slots   = sum(1 for _, t in collapsed if t == "meme")
+    app_ad_slots = sum(1 for _, t in collapsed if t == "app_ad")
+    dm_slots     = sum(1 for _, t in collapsed if t == "dm")
+    await progress_callback(
+        0.97,
+        f"Collapsed → {dm_slots} DM + {meme_slots} meme + {app_ad_slots} app_ad = {len(collapsed)} total",
+    )
+
+    # ── STAGE 3b (97–99 %): classify meme slots into library categories ──
+    meme_indices = [i for i, (_, t) in enumerate(collapsed) if t == "meme"]
+    meme_categories: dict[int, str] = {}
+
+    for rank, idx in enumerate(meme_indices):
+        is_first = (idx == 0)
+        is_last  = (rank == len(meme_indices) - 1) and len(meme_indices) > 1
+        fp       = collapsed[idx][0]
+        cat      = await classify_meme_category_ai(fp, is_first=is_first, is_last=is_last)
+        meme_categories[idx] = cat
+        await progress_callback(
+            0.97 + 0.02 * (rank + 1) / max(len(meme_indices), 1),
+            f"Meme {rank + 1}/{len(meme_indices)} → category: {cat}",
+        )
+
+    await progress_callback(0.99, "Stage 3b done — meme categories assigned")
+
+    # ── STAGE 4 (99–100 %): single fast DB write ─────────────────────────
+    db2 = await get_db()
+    try:
+        await db2.execute("DELETE FROM slides WHERE project_id=?", (project_id,))
+        for i, (frame_path, ftype) in enumerate(collapsed):
+            if ftype == "meme":
+                default_hold = 1500
+                cat = meme_categories.get(i, "cooking")
+            elif ftype == "app_ad":
+                default_hold = 1000
+                cat = None
+            else:  # dm
+                default_hold = 3000
+                cat = None
+            await db2.execute(
+                """INSERT INTO slides
+                   (id, project_id, sort_order, slide_type, source_frame_path,
+                    frame_type, is_active, hold_duration_ms, meme_category)
+                   VALUES (?, ?, ?, 'dm', ?, ?, 1, ?, ?)""",
+                (str(uuid.uuid4()), project_id, i, frame_path, ftype, default_hold, cat),
+            )
+        await db2.commit()
+    finally:
+        await db2.close()
+
+    return {
+        "raw_frames":  len(raw_frames),
+        "classified":  len(classified),
+        "collapsed":   len(collapsed),
+        "meme_categories": meme_categories,
+    }
+
+
 @router.post("/projects/{project_id}/import/extract-frames")
 async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFramesRequest()):
     """Extract scene keyframes from the downloaded video, classify each frame, and create slides."""
@@ -111,116 +219,7 @@ async def extract_frames(project_id: str, body: ExtractFramesRequest = ExtractFr
     job_id = await job_manager.create_job(project_id, "extract_frames")
 
     async def _extract(progress_callback, **_):
-        # ── STAGE 1 (0–40 %): capture one frame every 500 ms (2 fps) ─────────
-        async def _prog1(p: float, msg: str):
-            await progress_callback(p * 0.40, msg)
-
-        raw_frames = await extract_scenes(
-            video_path, project_id,
-            progress_callback=_prog1,
-        )
-        await progress_callback(0.40, f"Stage 1 done — {len(raw_frames)} raw samples captured")
-
-        # ── STAGE 2 (40–95 %): AI classify every frame ────────────────────────
-        # No visual dedup — GPT-4o-mini sees all frames.
-        # Text-fingerprint dedup runs later in the OCR step.
-        await progress_callback(0.40, "Stage 2 — classifying all frames with AI…")
-        classified: list[tuple[str, str]] = []
-
-        for i, fp in enumerate(raw_frames):
-            ftype = await classify_frame_ai(fp)
-            classified.append((fp, ftype))
-            await progress_callback(
-                0.40 + 0.55 * (i + 1) / max(len(raw_frames), 1),
-                f"Classified {i + 1}/{len(raw_frames)}: {ftype}",
-            )
-
-        await progress_callback(0.95, f"Stage 2 done — {len(classified)} frames classified")
-
-        # ── STAGE 3 (95–99 %): collapse consecutive meme runs + dedup app_ad ──
-        # - Consecutive meme frames → keep only the first as representative.
-        # - app_ad → keep only the very first occurrence.
-        # - DM frames → keep ALL (text dedup runs in the OCR step).
-        collapsed: list[tuple[str, str]] = []
-        in_meme_run = False
-        app_ad_seen = False
-
-        for fp, ftype in classified:
-            if ftype == "meme":
-                if not in_meme_run:
-                    in_meme_run = True
-                    collapsed.append((fp, "meme"))
-                # else: continuation of current meme run → skip
-            else:
-                if in_meme_run:
-                    in_meme_run = False
-                if ftype == "app_ad":
-                    if not app_ad_seen:
-                        collapsed.append((fp, "app_ad"))
-                        app_ad_seen = True
-                else:  # dm
-                    collapsed.append((fp, ftype))
-
-        # Flush trailing meme run (video ends on a meme)
-        # (already appended on entry; nothing extra needed)
-
-        meme_slots   = sum(1 for _, t in collapsed if t == "meme")
-        app_ad_slots = sum(1 for _, t in collapsed if t == "app_ad")
-        dm_slots     = sum(1 for _, t in collapsed if t == "dm")
-        await progress_callback(
-            0.97,
-            f"Collapsed → {dm_slots} DM + {meme_slots} meme + {app_ad_slots} app_ad = {len(collapsed)} total",
-        )
-
-        # ── STAGE 3b (97–99 %): classify each meme slot into a library category
-        # Rule: first meme → "opening", last meme → "succes", rest → GPT picks.
-        meme_indices = [i for i, (_, t) in enumerate(collapsed) if t == "meme"]
-        meme_categories: dict[int, str] = {}
-
-        for rank, idx in enumerate(meme_indices):
-            is_first = (idx == 0)                                                  # only opening when it IS the very first slide
-            is_last  = (rank == len(meme_indices) - 1) and len(meme_indices) > 1
-            fp       = collapsed[idx][0]
-            cat      = await classify_meme_category_ai(fp, is_first=is_first, is_last=is_last)
-            meme_categories[idx] = cat
-            await progress_callback(
-                0.97 + 0.02 * (rank + 1) / max(len(meme_indices), 1),
-                f"Meme {rank + 1}/{len(meme_indices)} → category: {cat}",
-            )
-
-        await progress_callback(0.99, "Stage 3b done — meme categories assigned")
-
-        # ── STAGE 4 (99–100 %): single fast DB write ─────────────────────────
-        db2 = await get_db()
-        try:
-            await db2.execute("DELETE FROM slides WHERE project_id=?", (project_id,))
-            for i, (frame_path, ftype) in enumerate(collapsed):
-                if ftype == "meme":
-                    default_hold = 1500
-                    cat = meme_categories.get(i, "cooking")
-                elif ftype == "app_ad":
-                    default_hold = 1000
-                    cat = None
-                else:  # dm
-                    default_hold = 3000
-                    cat = None
-                await db2.execute(
-                    """INSERT INTO slides
-                       (id, project_id, sort_order, slide_type, source_frame_path,
-                        frame_type, is_active, hold_duration_ms, meme_category)
-                       VALUES (?, ?, ?, 'dm', ?, ?, 1, ?, ?)""",
-                    (str(uuid.uuid4()), project_id, i, frame_path, ftype, default_hold, cat),
-                )
-            await db2.commit()
-        finally:
-            await db2.close()
-
-        return {
-            "raw_frames":  len(raw_frames),
-            "classified":  len(classified),
-            "collapsed":   len(collapsed),
-            "meme_categories": meme_categories,
-        }
+        return await run_extract_pipeline(project_id, video_path, progress_callback)
 
     await job_manager.submit(job_id, _extract)
     return {"job_id": job_id}
@@ -291,6 +290,354 @@ async def upload_meme(project_id: str, slide_id: str, file: UploadFile = File(..
 # OCR  (always translates to Dutch)
 # ---------------------------------------------------------------------------
 
+async def run_ocr_pipeline(project_id: str, progress_callback) -> dict:
+    """Core OCR → dedup → translate → app_ad logic, usable outside the HTTP layer."""
+    db2 = await get_db()
+    try:
+        cursor = await db2.execute(
+            "SELECT id, source_frame_path, frame_type FROM slides WHERE project_id=? ORDER BY sort_order",
+            (project_id,),
+        )
+        slides = await cursor.fetchall()
+    finally:
+        await db2.close()
+
+    total = len(slides)
+    dm_slides  = [s for s in slides if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"]
+
+    for idx, slide in enumerate(dm_slides):
+        slide_id = slide["id"]
+        frame_path = slide["source_frame_path"] if "source_frame_path" in slide.keys() else None
+
+        await progress_callback(idx / max(len(dm_slides), 1), f"OCR frame {idx + 1}/{len(dm_slides)}")
+
+        if not frame_path or not Path(frame_path).exists():
+            continue
+
+        # ── OCR: GPT-4o vision (primary) or EasyOCR (fallback) ────────
+        #
+        # Vision path  — one API call: reads text, classifies sender,
+        #                translates to Dutch street slang, detects story reply.
+        # Fallback path — EasyOCR + coordinate-based classification +
+        #                 GPT-4o-mini translation (separate calls, slower).
+
+        # Resolve API key (same helper used by translation & classifier)
+        _ocr_api_key = ""
+        try:
+            from database import get_db as _get_db2  # noqa: PLC0415
+            _db_tmp = await _get_db2()
+            try:
+                _row = await (await _db_tmp.execute(
+                    "SELECT openai_api_key FROM app_settings WHERE id=1"
+                )).fetchone()
+                if _row and _row["openai_api_key"]:
+                    _ocr_api_key = _row["openai_api_key"]
+            finally:
+                await _db_tmp.close()
+        except Exception:
+            pass
+        if not _ocr_api_key:
+            import os as _os
+            _ocr_api_key = _os.getenv("OPENAI_API_KEY", "")
+
+        if _ocr_api_key:
+            # ── Primary: GPT-4o vision ──────────────────────────────
+            messages, has_story_reply = await extract_messages_vision(
+                frame_path, _ocr_api_key
+            )
+        else:
+            # ── Fallback: EasyOCR (raw text, no per-message translation) ──
+            import cv2 as _cv2_ocr  # noqa: PLC0415
+            raw_blocks = await ocr_frame(frame_path)
+            _img = await asyncio.to_thread(_cv2_ocr.imread, frame_path)
+            img_h, img_w = (_img.shape[:2] if _img is not None else (1920, 1080))
+            filtered_blocks, has_story_reply = filter_message_blocks(
+                raw_blocks, image_height=img_h, image_width=img_w,
+            )
+            raw_msgs = classify_sender(filtered_blocks, image_width=img_w)
+            # Collect raw text — single batch translation happens below
+            messages = [{"sender": m["sender"], "text": m["text"]} for m in raw_msgs]
+
+        # Auto-create story_reply layout when detected
+        if has_story_reply and messages:
+            messages[0]["message_type"] = "story_reply"
+            messages[0]["story_reply_label"] = "Reageerde op je verhaal"
+        # ── end OCR ───────────────────────────────────────────────
+
+        db3 = await get_db()
+        try:
+            await db3.execute("DELETE FROM messages WHERE slide_id=?", (slide_id,))
+            for sort_i, m in enumerate(messages):
+                msg_type = m.get("message_type", "text")
+                label    = m.get("story_reply_label")
+                await db3.execute(
+                    """INSERT INTO messages
+                       (id, slide_id, sort_order, sender, text, message_type,
+                        show_timestamp, timestamp_text, read_receipt, emoji_reaction,
+                        story_image_path, story_reply_label)
+                       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, ?)""",
+                    (str(uuid.uuid4()), slide_id, sort_i,
+                     m["sender"], m["text"], msg_type, label),
+                )
+            await db3.commit()
+        finally:
+            await db3.close()
+
+    # ── PRE-TRANSLATION TEXT DEDUP ────────────────────────────────────
+    # Dedup using raw OCR text BEFORE paying for batch translation.
+    # Normalise: casefold + strip all whitespace + strip punctuation.
+    # This catches slides that are identical even when OCR introduced
+    # minor spacing differences (e.g. "dankje" vs "dank je").
+
+    await progress_callback(0.93, "Tekst dedup — duplicaten verwijderen vóór vertaling…")
+
+    import re as _re_dd
+
+    def _normalise(text: str) -> str:
+        t = text.casefold()
+        t = _re_dd.sub(r"\s+", "", t)     # remove all whitespace
+        t = _re_dd.sub(r"[^\w]", "", t)   # remove punctuation
+        return t
+
+    db_prededup = await get_db()
+    try:
+        _pd_cursor = await db_prededup.execute(
+            """SELECT s.id AS slide_id, s.sort_order AS slide_order,
+                      m.sort_order AS msg_order, m.text
+               FROM slides s
+               LEFT JOIN messages m ON m.slide_id = s.id
+               WHERE s.project_id = ? AND s.frame_type = 'dm' AND s.is_active = 1
+               ORDER BY s.sort_order, m.sort_order""",
+            (project_id,),
+        )
+        _pd_rows = await _pd_cursor.fetchall()
+    finally:
+        await db_prededup.close()
+
+    # Build one normalised fingerprint per slide (concat of all message texts)
+    from collections import OrderedDict as _OD_pd
+    _slide_txt: dict = _OD_pd()
+    for row in _pd_rows:
+        sid = row["slide_id"]
+        if sid not in _slide_txt:
+            _slide_txt[sid] = []
+        if row["text"] is not None:
+            _slide_txt[sid].append(_normalise(row["text"]))
+
+    _seen_txt_fps: set = set()
+    _pre_txt_dups: list = []
+    for sid, normed in _slide_txt.items():
+        if not normed:
+            continue          # slide with 0 messages → leave alone
+        fp = "".join(normed)
+        if fp in _seen_txt_fps:
+            _pre_txt_dups.append(sid)
+        else:
+            _seen_txt_fps.add(fp)
+
+    if _pre_txt_dups:
+        db_prededup2 = await get_db()
+        try:
+            for sid in _pre_txt_dups:
+                await db_prededup2.execute(
+                    "UPDATE slides SET is_active=0 WHERE id=?", (sid,)
+                )
+            await db_prededup2.commit()
+        finally:
+            await db_prededup2.close()
+        await progress_callback(
+            0.94,
+            f"Tekst dedup — {len(_pre_txt_dups)} duplicaat/duplicaten verwijderd",
+        )
+
+    # ── SINGLE BATCH TRANSLATION ──────────────────────────────────────
+    # Translate the entire conversation in ONE GPT call so that every
+    # occurrence of the same slang gets the same Dutch equivalent.
+    # OCR above intentionally extracted raw (untranslated) text so that
+    # this pass is the sole translation step.
+    # Only active (non-deduped) slides are translated.
+
+    await progress_callback(0.95, "Vertalen — volledige conversatie in één batch…")
+
+    # Fetch every raw message that was just written, with slide sort_order
+    db_batch = await get_db()
+    try:
+        batch_cursor = await db_batch.execute(
+            """SELECT m.id, m.slide_id, m.sort_order, m.sender, m.text,
+                      s.sort_order AS slide_order
+               FROM messages m
+               JOIN slides s ON s.id = m.slide_id
+               WHERE s.project_id=? AND s.is_active=1
+               ORDER BY s.sort_order, m.sort_order""",
+            (project_id,),
+        )
+        all_msgs = await batch_cursor.fetchall()
+    finally:
+        await db_batch.close()
+
+    if all_msgs:
+        # Build payload: slide = slide sort_order, index = message sort_order
+        payload = [
+            {
+                "msg_id":   r["id"],
+                "slide_id": r["slide_id"],
+                "slide":    r["slide_order"],
+                "index":    r["sort_order"],
+                "sender":   r["sender"],
+                "text":     r["text"],
+            }
+            for r in all_msgs
+        ]
+        consistent = await batch_translate_conversation(payload)
+
+        # Write back only changed texts
+        db_batch2 = await get_db()
+        try:
+            changed = [
+                (c["text"], c["msg_id"])
+                for orig, c in zip(payload, consistent)
+                if orig["text"] != c["text"]
+            ]
+            for new_text, msg_id in changed:
+                await db_batch2.execute(
+                    "UPDATE messages SET text=? WHERE id=?", (new_text, msg_id)
+                )
+            if changed:
+                await db_batch2.commit()
+        finally:
+            await db_batch2.close()
+
+    # ── APP_AD AUTO-RENDER (Taki UI) ──────────────────────────────────────
+    # Runs AFTER batch translation so the blue bubble shows Dutch text.
+    # For each app_ad slot:
+    #   • DM screenshot  → second-to-last DM slide before the slot
+    #                       (render fresh if not cached, reuse if already on disk)
+    #   • Next message   → first translated message of the last DM slide before slot
+    # Renders the Taki Jinja2 template with Playwright and saves the PNG.
+
+    await progress_callback(0.97, "App-ad slides genereren (Taki UI)…")
+
+    # Lazy imports — avoid circular deps at module load time
+    from services.dm_renderer import renderer as _renderer, _make_jitter   # noqa: PLC0415
+    from routers.renderer import _build_conversation_for_slide as _build_conv  # noqa: PLC0415
+    from services.appad_renderer import render_taki_appad                  # noqa: PLC0415
+
+    # Fetch the full ordered slide list (we need frame_type + rendered_path)
+    db_appad = await get_db()
+    try:
+        _appad_cur = await db_appad.execute(
+            """SELECT id, sort_order, frame_type, rendered_path
+               FROM slides
+               WHERE project_id=? AND is_active=1
+               ORDER BY sort_order""",
+            (project_id,),
+        )
+        all_ordered = await _appad_cur.fetchall()
+    finally:
+        await db_appad.close()
+
+    appad_rendered_dir = PROJECTS_DIR / project_id / "rendered"
+    appad_rendered_dir.mkdir(exist_ok=True)
+
+    for _slot_idx, _slot in enumerate(all_ordered):
+        _ft = _slot["frame_type"] if "frame_type" in _slot.keys() else "dm"
+        if _ft != "app_ad":
+            continue
+
+        # ── DM slides that precede this app_ad slot ──────────────────
+        _dm_before = [
+            s for s in all_ordered[:_slot_idx]
+            if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
+        ]
+
+        # ── DM screenshot: last DM before this slot that has actual text ──
+        # Walk backwards so we always pick the most-recent DM that
+        # contains at least one non-empty message bubble.
+        # NEVER use a DM slide with no text at all (empty black screen).
+        _screenshot_src = None
+        for _candidate in reversed(_dm_before):
+            _db_chk = await get_db()
+            try:
+                _chk = await (await _db_chk.execute(
+                    """SELECT COUNT(*) AS cnt FROM messages
+                       WHERE slide_id=? AND text IS NOT NULL AND trim(text) != ''""",
+                    (_candidate["id"],),
+                )).fetchone()
+                _has_text = (_chk["cnt"] if _chk else 0) > 0
+            finally:
+                await _db_chk.close()
+            if _has_text:
+                _screenshot_src = _candidate
+                break
+
+        # If no DM with text exists before this slot, skip rendering entirely
+        if not _screenshot_src:
+            await progress_callback(0.98, f"App-ad {_slot['id'][:8]} overgeslagen — geen DM met tekst gevonden")
+            continue
+
+        _dm_png: Optional[bytes] = None
+        if _screenshot_src:
+            _cached = (
+                _screenshot_src["rendered_path"]
+                if "rendered_path" in _screenshot_src.keys()
+                else None
+            )
+            if _cached and Path(_cached).exists():
+                # Reuse already-rendered PNG
+                _dm_png = Path(_cached).read_bytes()
+            else:
+                # Render fresh via Playwright
+                _conv = await _build_conv(project_id, _screenshot_src["id"])
+                _dm_png = await _renderer.render_slide(
+                    _conv, jitter=_make_jitter(_conv.theme)
+                )
+
+        # ── Next message: first translated message of first DM AFTER the slot ──
+        # The blue Taki bubble is a "suggested reply" — it shows what to send
+        # NEXT, so we read the first message from the first DM slide that
+        # follows this app_ad in the ordered list.
+        _dm_after = [
+            s for s in all_ordered[_slot_idx + 1:]
+            if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
+        ]
+        _next_msg = ""
+        if _dm_after:
+            _next_dm = _dm_after[0]
+            _db_msg = await get_db()
+            try:
+                _msg_row = await (await _db_msg.execute(
+                    "SELECT text FROM messages WHERE slide_id=? ORDER BY sort_order LIMIT 1",
+                    (_next_dm["id"],),
+                )).fetchone()
+                if _msg_row and _msg_row["text"]:
+                    _next_msg = _msg_row["text"]
+            finally:
+                await _db_msg.close()
+
+        # ── Render Taki template with Playwright ─────────────────────
+        _appad_png = await render_taki_appad(_dm_png, _next_msg, _renderer)
+
+        _appad_out = str(appad_rendered_dir / f"appad_{_slot['id']}.png")
+        Path(_appad_out).write_bytes(_appad_png)
+
+        # Store path in DB — both source_frame_path (for Frames review UI)
+        # and rendered_path (so the compositor reuses it without re-rendering)
+        _db_store = await get_db()
+        try:
+            await _db_store.execute(
+                "UPDATE slides SET source_frame_path=?, rendered_path=? WHERE id=?",
+                (_appad_out, _appad_out, _slot["id"]),
+            )
+            await _db_store.commit()
+        finally:
+            await _db_store.close()
+
+        await progress_callback(0.99, f"App-ad slide gegenereerd: appad_{_slot['id'][:8]}.png")
+
+    await progress_callback(1.0, f"Done — {len(dm_slides)} DM slides, {len(all_msgs)} messages translated")
+    return {"slides_processed": total, "dm_slides": len(dm_slides)}
+
+
 @router.post("/projects/{project_id}/import/run-ocr")
 async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
     """
@@ -300,350 +647,7 @@ async def run_ocr(project_id: str, body: OcrRequest = OcrRequest()):
     job_id = await job_manager.create_job(project_id, "ocr")
 
     async def _ocr(progress_callback, **_):
-        db2 = await get_db()
-        try:
-            cursor = await db2.execute(
-                "SELECT id, source_frame_path, frame_type FROM slides WHERE project_id=? ORDER BY sort_order",
-                (project_id,),
-            )
-            slides = await cursor.fetchall()
-        finally:
-            await db2.close()
-
-        total = len(slides)
-        dm_slides  = [s for s in slides if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"]
-
-        for idx, slide in enumerate(dm_slides):
-            slide_id = slide["id"]
-            frame_path = slide["source_frame_path"] if "source_frame_path" in slide.keys() else None
-
-            await progress_callback(idx / max(len(dm_slides), 1), f"OCR frame {idx + 1}/{len(dm_slides)}")
-
-            if not frame_path or not Path(frame_path).exists():
-                continue
-
-            # ── OCR: GPT-4o vision (primary) or EasyOCR (fallback) ────────
-            #
-            # Vision path  — one API call: reads text, classifies sender,
-            #                translates to Dutch street slang, detects story reply.
-            # Fallback path — EasyOCR + coordinate-based classification +
-            #                 GPT-4o-mini translation (separate calls, slower).
-
-            # Resolve API key (same helper used by translation & classifier)
-            _ocr_api_key = ""
-            try:
-                from database import get_db as _get_db2  # noqa: PLC0415
-                _db_tmp = await _get_db2()
-                try:
-                    _row = await (await _db_tmp.execute(
-                        "SELECT openai_api_key FROM app_settings WHERE id=1"
-                    )).fetchone()
-                    if _row and _row["openai_api_key"]:
-                        _ocr_api_key = _row["openai_api_key"]
-                finally:
-                    await _db_tmp.close()
-            except Exception:
-                pass
-            if not _ocr_api_key:
-                import os as _os
-                _ocr_api_key = _os.getenv("OPENAI_API_KEY", "")
-
-            if _ocr_api_key:
-                # ── Primary: GPT-4o vision ──────────────────────────────
-                messages, has_story_reply = await extract_messages_vision(
-                    frame_path, _ocr_api_key
-                )
-            else:
-                # ── Fallback: EasyOCR (raw text, no per-message translation) ──
-                import cv2 as _cv2_ocr  # noqa: PLC0415
-                raw_blocks = await ocr_frame(frame_path)
-                _img = await asyncio.to_thread(_cv2_ocr.imread, frame_path)
-                img_h, img_w = (_img.shape[:2] if _img is not None else (1920, 1080))
-                filtered_blocks, has_story_reply = filter_message_blocks(
-                    raw_blocks, image_height=img_h, image_width=img_w,
-                )
-                raw_msgs = classify_sender(filtered_blocks, image_width=img_w)
-                # Collect raw text — single batch translation happens below
-                messages = [{"sender": m["sender"], "text": m["text"]} for m in raw_msgs]
-
-            # Auto-create story_reply layout when detected
-            if has_story_reply and messages:
-                messages[0]["message_type"] = "story_reply"
-                messages[0]["story_reply_label"] = "Reageerde op je verhaal"
-            # ── end OCR ───────────────────────────────────────────────
-
-            db3 = await get_db()
-            try:
-                await db3.execute("DELETE FROM messages WHERE slide_id=?", (slide_id,))
-                for sort_i, m in enumerate(messages):
-                    msg_type = m.get("message_type", "text")
-                    label    = m.get("story_reply_label")
-                    await db3.execute(
-                        """INSERT INTO messages
-                           (id, slide_id, sort_order, sender, text, message_type,
-                            show_timestamp, timestamp_text, read_receipt, emoji_reaction,
-                            story_image_path, story_reply_label)
-                           VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, ?)""",
-                        (str(uuid.uuid4()), slide_id, sort_i,
-                         m["sender"], m["text"], msg_type, label),
-                    )
-                await db3.commit()
-            finally:
-                await db3.close()
-
-        # ── PRE-TRANSLATION TEXT DEDUP ────────────────────────────────────
-        # Dedup using raw OCR text BEFORE paying for batch translation.
-        # Normalise: casefold + strip all whitespace + strip punctuation.
-        # This catches slides that are identical even when OCR introduced
-        # minor spacing differences (e.g. "dankje" vs "dank je").
-
-        await progress_callback(0.93, "Tekst dedup — duplicaten verwijderen vóór vertaling…")
-
-        import re as _re_dd
-
-        def _normalise(text: str) -> str:
-            t = text.casefold()
-            t = _re_dd.sub(r"\s+", "", t)     # remove all whitespace
-            t = _re_dd.sub(r"[^\w]", "", t)   # remove punctuation
-            return t
-
-        db_prededup = await get_db()
-        try:
-            _pd_cursor = await db_prededup.execute(
-                """SELECT s.id AS slide_id, s.sort_order AS slide_order,
-                          m.sort_order AS msg_order, m.text
-                   FROM slides s
-                   LEFT JOIN messages m ON m.slide_id = s.id
-                   WHERE s.project_id = ? AND s.frame_type = 'dm' AND s.is_active = 1
-                   ORDER BY s.sort_order, m.sort_order""",
-                (project_id,),
-            )
-            _pd_rows = await _pd_cursor.fetchall()
-        finally:
-            await db_prededup.close()
-
-        # Build one normalised fingerprint per slide (concat of all message texts)
-        from collections import OrderedDict as _OD_pd
-        _slide_txt: dict = _OD_pd()
-        for row in _pd_rows:
-            sid = row["slide_id"]
-            if sid not in _slide_txt:
-                _slide_txt[sid] = []
-            if row["text"] is not None:
-                _slide_txt[sid].append(_normalise(row["text"]))
-
-        _seen_txt_fps: set = set()
-        _pre_txt_dups: list = []
-        for sid, normed in _slide_txt.items():
-            if not normed:
-                continue          # slide with 0 messages → leave alone
-            fp = "".join(normed)
-            if fp in _seen_txt_fps:
-                _pre_txt_dups.append(sid)
-            else:
-                _seen_txt_fps.add(fp)
-
-        if _pre_txt_dups:
-            db_prededup2 = await get_db()
-            try:
-                for sid in _pre_txt_dups:
-                    await db_prededup2.execute(
-                        "UPDATE slides SET is_active=0 WHERE id=?", (sid,)
-                    )
-                await db_prededup2.commit()
-            finally:
-                await db_prededup2.close()
-            await progress_callback(
-                0.94,
-                f"Tekst dedup — {len(_pre_txt_dups)} duplicaat/duplicaten verwijderd",
-            )
-
-        # ── SINGLE BATCH TRANSLATION ──────────────────────────────────────
-        # Translate the entire conversation in ONE GPT call so that every
-        # occurrence of the same slang gets the same Dutch equivalent.
-        # OCR above intentionally extracted raw (untranslated) text so that
-        # this pass is the sole translation step.
-        # Only active (non-deduped) slides are translated.
-
-        await progress_callback(0.95, "Vertalen — volledige conversatie in één batch…")
-
-        # Fetch every raw message that was just written, with slide sort_order
-        db_batch = await get_db()
-        try:
-            batch_cursor = await db_batch.execute(
-                """SELECT m.id, m.slide_id, m.sort_order, m.sender, m.text,
-                          s.sort_order AS slide_order
-                   FROM messages m
-                   JOIN slides s ON s.id = m.slide_id
-                   WHERE s.project_id=? AND s.is_active=1
-                   ORDER BY s.sort_order, m.sort_order""",
-                (project_id,),
-            )
-            all_msgs = await batch_cursor.fetchall()
-        finally:
-            await db_batch.close()
-
-        if all_msgs:
-            # Build payload: slide = slide sort_order, index = message sort_order
-            payload = [
-                {
-                    "msg_id":   r["id"],
-                    "slide_id": r["slide_id"],
-                    "slide":    r["slide_order"],
-                    "index":    r["sort_order"],
-                    "sender":   r["sender"],
-                    "text":     r["text"],
-                }
-                for r in all_msgs
-            ]
-            consistent = await batch_translate_conversation(payload)
-
-            # Write back only changed texts
-            db_batch2 = await get_db()
-            try:
-                changed = [
-                    (c["text"], c["msg_id"])
-                    for orig, c in zip(payload, consistent)
-                    if orig["text"] != c["text"]
-                ]
-                for new_text, msg_id in changed:
-                    await db_batch2.execute(
-                        "UPDATE messages SET text=? WHERE id=?", (new_text, msg_id)
-                    )
-                if changed:
-                    await db_batch2.commit()
-            finally:
-                await db_batch2.close()
-
-        # ── APP_AD AUTO-RENDER (Taki UI) ──────────────────────────────────────
-        # Runs AFTER batch translation so the blue bubble shows Dutch text.
-        # For each app_ad slot:
-        #   • DM screenshot  → second-to-last DM slide before the slot
-        #                       (render fresh if not cached, reuse if already on disk)
-        #   • Next message   → first translated message of the last DM slide before slot
-        # Renders the Taki Jinja2 template with Playwright and saves the PNG.
-
-        await progress_callback(0.97, "App-ad slides genereren (Taki UI)…")
-
-        # Lazy imports — avoid circular deps at module load time
-        from services.dm_renderer import renderer as _renderer, _make_jitter   # noqa: PLC0415
-        from routers.renderer import _build_conversation_for_slide as _build_conv  # noqa: PLC0415
-        from services.appad_renderer import render_taki_appad                  # noqa: PLC0415
-
-        # Fetch the full ordered slide list (we need frame_type + rendered_path)
-        db_appad = await get_db()
-        try:
-            _appad_cur = await db_appad.execute(
-                """SELECT id, sort_order, frame_type, rendered_path
-                   FROM slides
-                   WHERE project_id=? AND is_active=1
-                   ORDER BY sort_order""",
-                (project_id,),
-            )
-            all_ordered = await _appad_cur.fetchall()
-        finally:
-            await db_appad.close()
-
-        appad_rendered_dir = PROJECTS_DIR / project_id / "rendered"
-        appad_rendered_dir.mkdir(exist_ok=True)
-
-        for _slot_idx, _slot in enumerate(all_ordered):
-            _ft = _slot["frame_type"] if "frame_type" in _slot.keys() else "dm"
-            if _ft != "app_ad":
-                continue
-
-            # ── DM slides that precede this app_ad slot ──────────────────
-            _dm_before = [
-                s for s in all_ordered[:_slot_idx]
-                if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
-            ]
-
-            # ── DM screenshot: last DM before this slot that has actual text ──
-            # Walk backwards so we always pick the most-recent DM that
-            # contains at least one non-empty message bubble.
-            # NEVER use a DM slide with no text at all (empty black screen).
-            _screenshot_src = None
-            for _candidate in reversed(_dm_before):
-                _db_chk = await get_db()
-                try:
-                    _chk = await (await _db_chk.execute(
-                        """SELECT COUNT(*) AS cnt FROM messages
-                           WHERE slide_id=? AND text IS NOT NULL AND trim(text) != ''""",
-                        (_candidate["id"],),
-                    )).fetchone()
-                    _has_text = (_chk["cnt"] if _chk else 0) > 0
-                finally:
-                    await _db_chk.close()
-                if _has_text:
-                    _screenshot_src = _candidate
-                    break
-
-            # If no DM with text exists before this slot, skip rendering entirely
-            if not _screenshot_src:
-                await progress_callback(0.98, f"App-ad {_slot['id'][:8]} overgeslagen — geen DM met tekst gevonden")
-                continue
-
-            _dm_png: Optional[bytes] = None
-            if _screenshot_src:
-                _cached = (
-                    _screenshot_src["rendered_path"]
-                    if "rendered_path" in _screenshot_src.keys()
-                    else None
-                )
-                if _cached and Path(_cached).exists():
-                    # Reuse already-rendered PNG
-                    _dm_png = Path(_cached).read_bytes()
-                else:
-                    # Render fresh via Playwright
-                    _conv = await _build_conv(project_id, _screenshot_src["id"])
-                    _dm_png = await _renderer.render_slide(
-                        _conv, jitter=_make_jitter(_conv.theme)
-                    )
-
-            # ── Next message: first translated message of first DM AFTER the slot ──
-            # The blue Taki bubble is a "suggested reply" — it shows what to send
-            # NEXT, so we read the first message from the first DM slide that
-            # follows this app_ad in the ordered list.
-            _dm_after = [
-                s for s in all_ordered[_slot_idx + 1:]
-                if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
-            ]
-            _next_msg = ""
-            if _dm_after:
-                _next_dm = _dm_after[0]
-                _db_msg = await get_db()
-                try:
-                    _msg_row = await (await _db_msg.execute(
-                        "SELECT text FROM messages WHERE slide_id=? ORDER BY sort_order LIMIT 1",
-                        (_next_dm["id"],),
-                    )).fetchone()
-                    if _msg_row and _msg_row["text"]:
-                        _next_msg = _msg_row["text"]
-                finally:
-                    await _db_msg.close()
-
-            # ── Render Taki template with Playwright ─────────────────────
-            _appad_png = await render_taki_appad(_dm_png, _next_msg, _renderer)
-
-            _appad_out = str(appad_rendered_dir / f"appad_{_slot['id']}.png")
-            Path(_appad_out).write_bytes(_appad_png)
-
-            # Store path in DB — both source_frame_path (for Frames review UI)
-            # and rendered_path (so the compositor reuses it without re-rendering)
-            _db_store = await get_db()
-            try:
-                await _db_store.execute(
-                    "UPDATE slides SET source_frame_path=?, rendered_path=? WHERE id=?",
-                    (_appad_out, _appad_out, _slot["id"]),
-                )
-                await _db_store.commit()
-            finally:
-                await _db_store.close()
-
-            await progress_callback(0.99, f"App-ad slide gegenereerd: appad_{_slot['id'][:8]}.png")
-
-        await progress_callback(1.0, f"Done — {len(dm_slides)} DM slides, {len(all_msgs)} messages translated")
-        return {"slides_processed": total, "dm_slides": len(dm_slides)}
+        return await run_ocr_pipeline(project_id, progress_callback)
 
     await job_manager.submit(job_id, _ocr)
     return {"job_id": job_id}

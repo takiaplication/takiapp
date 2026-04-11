@@ -8,6 +8,7 @@ import ExportPanel from '../components/export/ExportPanel'
 import ImportStep from '../components/import/ImportStep'
 import FramesStep from '../components/frames/FramesStep'
 import OcrStep from '../components/ocr/OcrStep'
+import { approveProject } from '../api/projects'
 
 type Step = 'import' | 'frames' | 'ocr' | 'editor' | 'export'
 
@@ -24,12 +25,33 @@ export default function ProjectEditor() {
   const navigate = useNavigate()
   const { currentProject, loadProject, loading } = useProjectStore()
   const [activeStep, setActiveStep] = useState<Step>('import')
+  const [approving, setApproving] = useState(false)
+
+  async function handleGoodToGo() {
+    if (!projectId) return
+    setApproving(true)
+    try {
+      await approveProject(projectId)
+      navigate('/')
+    } finally {
+      setApproving(false)
+    }
+  }
 
   useEffect(() => {
     if (projectId) {
       loadProject(projectId)
     }
   }, [projectId, loadProject])
+
+  // Auto-jump to editor when opening a project that already went through OCR
+  useEffect(() => {
+    if (!currentProject) return
+    const s = currentProject.status
+    if (s === 'review' || s === 'approved' || s === 'library') {
+      setActiveStep('editor')
+    }
+  }, [currentProject?.status])
 
   if (loading) {
     return (
@@ -59,6 +81,18 @@ export default function ProjectEditor() {
         </button>
         <span className="text-sm font-medium truncate max-w-xs">{currentProject.name}</span>
         <div className="flex-1" />
+
+        {/* "Good to go" — visible in editor step only */}
+        {activeStep === 'editor' && (
+          <button
+            onClick={handleGoodToGo}
+            disabled={approving}
+            className="mr-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50
+                       text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors"
+          >
+            {approving ? 'Bezig…' : '✓ Good to go'}
+          </button>
+        )}
 
         {/* Step tabs */}
         <div className="flex gap-0.5">

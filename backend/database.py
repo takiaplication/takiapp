@@ -99,6 +99,8 @@ async def init_db():
             ("slides", "meme_category", "TEXT"),
             ("projects", "source_url", "TEXT"),
             ("projects", "video_path", "TEXT"),
+            ("projects", "pipeline_step", "TEXT"),
+            ("projects", "pipeline_error", "TEXT"),
         ]
         for table, col, definition in migrations:
             try:
