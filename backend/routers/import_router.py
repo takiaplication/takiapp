@@ -592,10 +592,9 @@ async def run_ocr_pipeline(project_id: str, progress_callback) -> dict:
                     _conv, jitter=_make_jitter(_conv.theme)
                 )
 
-        # ── Next message: first translated message of first DM AFTER the slot ──
-        # The blue Taki bubble is a "suggested reply" — it shows what to send
-        # NEXT, so we read the first message from the first DM slide that
-        # follows this app_ad in the ordered list.
+        # ── Blue bubble: last "self" message of the first DM AFTER this slot ──
+        # Rule: the bubble shows the last outgoing (sender='self') message
+        # from the DM slide that immediately follows this app_ad.
         _dm_after = [
             s for s in all_ordered[_slot_idx + 1:]
             if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
@@ -606,7 +605,10 @@ async def run_ocr_pipeline(project_id: str, progress_callback) -> dict:
             _db_msg = await get_db()
             try:
                 _msg_row = await (await _db_msg.execute(
-                    "SELECT text FROM messages WHERE slide_id=? ORDER BY sort_order LIMIT 1",
+                    """SELECT text FROM messages
+                       WHERE slide_id=? AND sender='self'
+                         AND text IS NOT NULL AND trim(text) != ''
+                       ORDER BY sort_order DESC LIMIT 1""",
                     (_next_dm["id"],),
                 )).fetchone()
                 if _msg_row and _msg_row["text"]:
@@ -794,7 +796,10 @@ async def rerender_appad(project_id: str, slide_id: str):
         db_msg = await get_db()
         try:
             msg_row = await (await db_msg.execute(
-                "SELECT text FROM messages WHERE slide_id=? ORDER BY sort_order LIMIT 1",
+                """SELECT text FROM messages
+                   WHERE slide_id=? AND sender='self'
+                     AND text IS NOT NULL AND trim(text) != ''
+                   ORDER BY sort_order DESC LIMIT 1""",
                 (dm_after[0]["id"],),
             )).fetchone()
             if msg_row and msg_row["text"]:
