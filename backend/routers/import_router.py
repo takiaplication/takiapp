@@ -718,3 +718,107 @@ async def list_frames(project_id: str):
         }
         for r in rows
     ]
+
+
+# ── Re-render a single app_ad slide ───────────────────────────────────────────
+
+@router.post("/projects/{project_id}/slides/{slide_id}/rerender-appad")
+async def rerender_appad(project_id: str, slide_id: str):
+    """
+    Re-render one app_ad slide using the current state of the surrounding DM slides.
+    Call this after editing the DM slide that feeds the app_ad screenshot / bubble text.
+    Returns {"frame_url": "/files/…"} with the freshly rendered PNG.
+    """
+    # ── Lazy imports (avoid circular deps) ─────────────────────────────────
+    from services.dm_renderer import renderer as _renderer, _make_jitter   # noqa: PLC0415
+    from routers.renderer import _build_conversation_for_slide as _build_conv  # noqa: PLC0415
+    from services.appad_renderer import render_taki_appad                   # noqa: PLC0415
+
+    # ── Fetch all ordered active slides ────────────────────────────────────
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT id, sort_order, frame_type, rendered_path
+               FROM slides WHERE project_id=? AND is_active=1 ORDER BY sort_order""",
+            (project_id,),
+        )
+        all_slides = await cur.fetchall()
+    finally:
+        await db.close()
+
+    # Find the slot index for this slide
+    slot_idx = next((i for i, s in enumerate(all_slides) if s["id"] == slide_id), None)
+    if slot_idx is None:
+        raise HTTPException(status_code=404, detail="Slide not found in this project")
+
+    slot = all_slides[slot_idx]
+    if (slot["frame_type"] if "frame_type" in slot.keys() else "dm") != "app_ad":
+        raise HTTPException(status_code=400, detail="Slide is not an app_ad slide")
+
+    # ── Find the best DM screenshot (last DM before this slot with text) ──
+    dm_before = [
+        s for s in all_slides[:slot_idx]
+        if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
+    ]
+
+    screenshot_src = None
+    for candidate in reversed(dm_before):
+        db_chk = await get_db()
+        try:
+            chk = await (await db_chk.execute(
+                """SELECT COUNT(*) AS cnt FROM messages
+                   WHERE slide_id=? AND text IS NOT NULL AND trim(text) != ''""",
+                (candidate["id"],),
+            )).fetchone()
+            has_text = (chk["cnt"] if chk else 0) > 0
+        finally:
+            await db_chk.close()
+        if has_text:
+            screenshot_src = candidate
+            break
+
+    if not screenshot_src:
+        raise HTTPException(status_code=422, detail="No DM slide with text found before this app_ad")
+
+    # ── Render DM screenshot (always fresh — picks up latest message edits) ──
+    conv = await _build_conv(project_id, screenshot_src["id"])
+    dm_png: bytes = await _renderer.render_slide(conv, jitter=_make_jitter(conv.theme))
+
+    # ── Next message: first message from first DM AFTER this slot ──────────
+    dm_after = [
+        s for s in all_slides[slot_idx + 1:]
+        if (s["frame_type"] if "frame_type" in s.keys() else "dm") == "dm"
+    ]
+    next_msg = ""
+    if dm_after:
+        db_msg = await get_db()
+        try:
+            msg_row = await (await db_msg.execute(
+                "SELECT text FROM messages WHERE slide_id=? ORDER BY sort_order LIMIT 1",
+                (dm_after[0]["id"],),
+            )).fetchone()
+            if msg_row and msg_row["text"]:
+                next_msg = msg_row["text"]
+        finally:
+            await db_msg.close()
+
+    # ── Render Taki template ────────────────────────────────────────────────
+    appad_png = await render_taki_appad(dm_png, next_msg, _renderer)
+
+    appad_out = str(PROJECTS_DIR / project_id / "rendered" / f"appad_{slide_id}.png")
+    Path(appad_out).parent.mkdir(parents=True, exist_ok=True)
+    Path(appad_out).write_bytes(appad_png)
+
+    # Update DB
+    db_save = await get_db()
+    try:
+        await db_save.execute(
+            "UPDATE slides SET source_frame_path=?, rendered_path=? WHERE id=? AND project_id=?",
+            (appad_out, appad_out, slide_id, project_id),
+        )
+        await db_save.commit()
+    finally:
+        await db_save.close()
+
+    frame_url = _to_url_path(appad_out)
+    return {"frame_url": frame_url, "slide_id": slide_id}

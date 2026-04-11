@@ -30,6 +30,7 @@ interface ProjectStore {
   refreshPreview: () => Promise<void>
   reorderSlides: (newOrder: string[]) => Promise<void>
   updateSlideMeme: (slideId: string, frameUrl: string, holdMs: number) => void
+  updateSlideFrame: (slideId: string, frameUrl: string, holdMs: number) => void
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -187,6 +188,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   updateSlideMeme: (slideId: string, frameUrl: string, holdMs: number) => {
+    set((s) => ({
+      slides: s.slides.map((sl) =>
+        sl.id === slideId ? { ...sl, frame_url: frameUrl, hold_duration_ms: holdMs } : sl,
+      ),
+    }))
+  },
+
+  updateSlideFrame: (slideId: string, frameUrl: string, holdMs: number) => {
     set((s) => ({
       slides: s.slides.map((sl) =>
         sl.id === slideId ? { ...sl, frame_url: frameUrl, hold_duration_ms: holdMs } : sl,

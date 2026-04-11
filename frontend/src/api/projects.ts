@@ -149,6 +149,14 @@ export async function listFrameSlides(projectId: string): Promise<FrameSlide[]> 
   return res.data
 }
 
+export async function rerenderAppad(
+  projectId: string,
+  slideId: string,
+): Promise<{ frame_url: string; slide_id: string }> {
+  const res = await api.post(`/projects/${projectId}/slides/${slideId}/rerender-appad`)
+  return res.data
+}
+
 // --- Meme library ---
 
 export type MemeCategory = 'opening' | 'sport' | 'coocked' | 'cooking' | 'shoot_our_shot' | 'succes'
