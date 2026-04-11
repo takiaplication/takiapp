@@ -53,20 +53,20 @@ body {
     background: var(--bg);
     display: flex;
     flex-direction: column;
+    justify-content: center;
 }
 
-/* ===== MESSAGE AREA — bubbles sit at the bottom ===== */
+/* ===== MESSAGE AREA — tight gray block, centered on black canvas ===== */
 .messages {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
-    padding: 60px var(--j-msg-x, 42px) 80px;
+    justify-content: flex-start;
+    padding: 16px var(--j-msg-x, 42px);
     overflow: hidden;
     gap: 0;
     background: #1C1C1E;
     border-radius: 72px;
-    margin: 80px 40px;
+    margin: 0 40px;
 }
 
 /* ===== TIMESTAMP DIVIDER ===== */
