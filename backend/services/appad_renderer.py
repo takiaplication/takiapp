@@ -22,19 +22,20 @@ import numpy as np
 from PIL import Image
 from jinja2 import Environment, FileSystemLoader
 
-from config import TEMPLATES_DIR, STORAGE_DIR
+from config import TEMPLATES_DIR, STORAGE_DIR, BASE_DIR
 
-# Logo is stored at storage/taki_logo.png — loaded once at import time.
-_LOGO_PATH = STORAGE_DIR / "taki_logo.png"
+# Logo lives in the frontend public folder: finalversion/public/takilogo.png
+_PUBLIC_DIR = BASE_DIR / "public"
 
 
 def _load_logo_data_url() -> str:
     """Return a base64 data-URL for the Taki logo, or '' if not found."""
     for candidate in (
-        STORAGE_DIR / "taki_logo.png",
-        STORAGE_DIR / "taki_logo.jpg",
-        STORAGE_DIR / "taki_logo.svg",
-        STORAGE_DIR / "taki_logo.webp",
+        _PUBLIC_DIR / "takilogo.png",
+        _PUBLIC_DIR / "takilogo.jpg",
+        _PUBLIC_DIR / "takilogo.svg",
+        _PUBLIC_DIR / "takilogo.webp",
+        STORAGE_DIR / "taki_logo.png",   # legacy fallback
     ):
         if candidate.exists():
             mime_map = {
