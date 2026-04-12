@@ -9,8 +9,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { MEME_CATEGORIES, type LibraryMeme, type MemeCategory } from '../../api/projects'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../../api/config'
 
 interface Props {
   projectId: string

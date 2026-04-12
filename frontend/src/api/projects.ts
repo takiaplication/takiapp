@@ -1,4 +1,5 @@
 import api from './client'
+import { API_BASE } from './config'
 import type { Project, Slide, Message, RenderSettings } from '../types/project'
 
 export async function listProjects(): Promise<Project[]> {
@@ -80,7 +81,7 @@ export async function exportVideo(projectId: string): Promise<string> {
 }
 
 export function getExportDownloadUrl(projectId: string): string {
-  return `/api/projects/${projectId}/export/download`
+  return `${API_BASE}/api/projects/${projectId}/export/download`
 }
 
 export async function uploadStoryImage(projectId: string, file: File): Promise<string> {

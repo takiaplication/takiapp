@@ -4,8 +4,7 @@ import * as api from '../../api/projects'
 import type { MemeCategory } from '../../api/projects'
 import { useJobProgress } from '../../hooks/useJobProgress'
 import MemeLibraryModal from './MemeLibraryModal'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../../api/config'
 
 interface Props {
   onNext: () => void

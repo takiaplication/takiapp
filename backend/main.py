@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,9 +53,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ReelFactory", version="0.1.0", lifespan=lifespan)
 
+# Build allowed origins: always include localhost dev server +
+# any extra origins supplied via ALLOWED_ORIGINS env var (comma-separated)
+_extra = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+_origins = ["http://localhost:5173"] + _extra
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",   # all Vercel preview/prod URLs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

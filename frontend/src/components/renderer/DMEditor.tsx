@@ -4,8 +4,7 @@ import { uploadStoryImage, uploadMemeToSlide, useOriginalClip, saveClipToLibrary
 import type { Message } from '../../types/project'
 import type { MemeCategory } from '../../api/projects'
 import MemeLibraryModal from '../frames/MemeLibraryModal'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../../api/config'
 
 // ─── Meme slide panel ────────────────────────────────────────────────────────
 

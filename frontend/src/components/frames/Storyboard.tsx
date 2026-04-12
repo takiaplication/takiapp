@@ -14,8 +14,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../../api/config'
 
 function SortableSlide({ id, index, isActive, isMeme, isAppAd, frameUrl, memeCategory, onClick, onDelete }: {
   id: string

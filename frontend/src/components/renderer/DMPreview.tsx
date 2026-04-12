@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useProjectStore } from '../../store/projectStore'
 import { rerenderAppad } from '../../api/projects'
-
-const API_BASE = 'http://localhost:8000'
+import { API_BASE } from '../../api/config'
 
 export default function DMPreview() {
   const { previewUrl, previewRendering, activeSlideId, slides, currentProject, updateSlideFrame } =
