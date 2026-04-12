@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 from pathlib import Path
 from typing import Optional
@@ -89,7 +90,13 @@ class DMRenderer:
 
     async def start(self):
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
+        chromium_path = os.environ.get(
+            "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "/usr/bin/chromium"
+        )
+        self._browser = await self._playwright.chromium.launch(
+            headless=True,
+            executable_path=chromium_path,
+        )
 
     async def stop(self):
         if self._browser:

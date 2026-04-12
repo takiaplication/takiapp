@@ -45,8 +45,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Tell Playwright to use the system Chromium (no browser download)
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/bin
+# Verify system Chromium is present and expose its path to the app
+RUN which chromium && chromium --version
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copy pre-built Python packages and scripts from builder
