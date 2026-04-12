@@ -6,6 +6,7 @@ PROJECTS_DIR = STORAGE_DIR / "projects"
 MEME_LIBRARY_DIR = STORAGE_DIR / "meme_library"   # shared Dutch meme library
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+FONTS_DIR = BASE_DIR / "fonts"
 DATABASE_PATH = STORAGE_DIR / "reelfactory.db"
 
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)

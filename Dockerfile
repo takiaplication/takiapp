@@ -60,6 +60,9 @@ WORKDIR /app
 # Copy backend source
 COPY backend/ ./backend/
 
+# Copy SF Pro fonts (used by Playwright DM renderer)
+COPY fonts/ ./fonts/
+
 # Copy built frontend dist so FastAPI can serve it as static files
 COPY --from=frontend-builder /app/frontend/dist ./backend/static/dist
 

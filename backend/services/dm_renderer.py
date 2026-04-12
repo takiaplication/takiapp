@@ -6,7 +6,7 @@ from typing import Optional
 from playwright.async_api import async_playwright, Playwright, Browser
 from jinja2 import Environment, FileSystemLoader
 
-from config import TEMPLATES_DIR
+from config import TEMPLATES_DIR, BASE_DIR
 from schemas.render import DMConversation, DMMessage
 
 
@@ -132,7 +132,11 @@ class DMRenderer:
         )
         try:
             page = await context.new_page()
-            await page.set_content(html, wait_until="load")
+            await page.set_content(
+                html,
+                wait_until="load",
+                base_url=f"file://{BASE_DIR}/",
+            )
             # Small delay to let fonts settle
             await page.wait_for_timeout(100)
             png_bytes = await page.screenshot(type="png")
