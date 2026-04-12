@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import os
 import random
 import shutil
@@ -85,6 +86,7 @@ class DMRenderer:
     def __init__(self):
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
+        self._font_b64: Optional[str] = None
         self._jinja_env = Environment(
             loader=FileSystemLoader(str(TEMPLATES_DIR)),
             autoescape=False,
@@ -98,7 +100,30 @@ class DMRenderer:
         self._browser = await self._playwright.chromium.launch(
             headless=True,
             executable_path=chromium_path,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--allow-file-access-from-files",
+                "--disable-web-security",
+                "--font-render-hinting=none",
+            ],
         )
+
+        # Pre-load font as base64 at startup so we can inject it into every
+        # rendered HTML — guarantees the font is available regardless of how
+        # Chromium resolves file:// or data: URIs.
+        font_path = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
+        if font_path.exists():
+            self._font_b64 = base64.b64encode(font_path.read_bytes()).decode()
+            print(f"[DMRenderer] Loaded SF Pro Text WOFF2 ({font_path.stat().st_size} bytes)")
+        else:
+            # Fallback: try the OTF file
+            otf_path = FONTS_DIR / "SF-Pro-Text-Regular.otf"
+            if otf_path.exists():
+                self._font_b64 = base64.b64encode(otf_path.read_bytes()).decode()
+                print(f"[DMRenderer] Loaded SF Pro Text OTF fallback ({otf_path.stat().st_size} bytes)")
+            else:
+                print(f"[DMRenderer] WARNING: No SF Pro font found in {FONTS_DIR}")
 
     async def stop(self):
         if self._browser:
@@ -128,11 +153,26 @@ class DMRenderer:
             jitter=jitter,
         )
 
-        # Write HTML + font into a temp dir so Chromium can load the font via
-        # file:// without any cross-origin restrictions (same dir = same origin).
+        # BELT: Inject font as base64 data URI directly into the HTML.
+        # This guarantees the font bytes are part of the document itself —
+        # no file loading, no network loading, no CORS, no origin issues.
+        if self._font_b64:
+            font_ext = "woff2"
+            font_path = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
+            if not font_path.exists():
+                font_ext = "otf"
+            data_uri = f'url("data:font/{font_ext};base64,{self._font_b64}") format("{"woff2" if font_ext == "woff2" else "opentype"}")'
+            html = html.replace(
+                'url("SF-Pro-Text-Regular.woff2") format("woff2")',
+                data_uri,
+            )
+
+        # Write to temp file and use page.goto(file://) — file:// origin is
+        # more permissive than about:blank for resource loading.
         tmpdir = tempfile.mkdtemp(prefix="dm_render_")
         try:
-            # Copy WOFF2 font next to the HTML so the relative URL resolves
+            # SUSPENDERS: Also copy the WOFF2 file next to the HTML as a
+            # fallback in case the base64 injection somehow fails.
             font_src = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
             if font_src.exists():
                 shutil.copy(font_src, tmpdir)
@@ -147,13 +187,97 @@ class DMRenderer:
             try:
                 page = await context.new_page()
                 await page.goto(f"file://{html_path}", wait_until="load")
-                await page.evaluate("document.fonts.ready")
+
+                # Wait for the font to be fully decoded and applied, then
+                # force a layout reflow so Chromium re-rasterises all text
+                # with the correct typeface.
+                await page.evaluate("""
+                    async () => {
+                        await document.fonts.ready;
+                        // Force layout reflow
+                        document.body.offsetHeight;
+                    }
+                """)
+
                 png_bytes = await page.screenshot(type="png")
                 return png_bytes
             finally:
                 await context.close()
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    async def get_font_debug_info(self) -> dict:
+        """Return diagnostic info about font loading — used by /test-font-debug."""
+        font_woff2 = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
+        font_otf = FONTS_DIR / "SF-Pro-Text-Regular.otf"
+
+        info = {
+            "fonts_dir": str(FONTS_DIR),
+            "fonts_dir_exists": FONTS_DIR.exists(),
+            "woff2_path": str(font_woff2),
+            "woff2_exists": font_woff2.exists(),
+            "woff2_size": font_woff2.stat().st_size if font_woff2.exists() else 0,
+            "otf_exists": font_otf.exists(),
+            "font_b64_loaded": self._font_b64 is not None,
+            "font_b64_length": len(self._font_b64) if self._font_b64 else 0,
+            "fonts_dir_contents": sorted(
+                f.name for f in FONTS_DIR.iterdir()
+            ) if FONTS_DIR.exists() else [],
+        }
+
+        # Test actual font loading in Playwright
+        if self._font_b64 and self._browser:
+            test_html = f"""<!DOCTYPE html>
+            <html><head><style>
+            @font-face {{
+                font-family: "SF Pro Text";
+                src: url("data:font/woff2;base64,{self._font_b64}") format("woff2");
+                font-weight: 400;
+                font-style: normal;
+                font-display: block;
+            }}
+            body {{ font-family: 'SF Pro Text', sans-serif; font-size: 48px; }}
+            </style></head>
+            <body><p id="test">ABCabc123</p></body></html>"""
+
+            tmpdir = tempfile.mkdtemp(prefix="dm_debug_")
+            try:
+                html_path = Path(tmpdir) / "debug.html"
+                html_path.write_text(test_html, encoding="utf-8")
+
+                context = await self._browser.new_context(
+                    viewport={"width": 800, "height": 600},
+                )
+                try:
+                    page = await context.new_page()
+                    await page.goto(f"file://{html_path}", wait_until="load")
+                    await page.evaluate("document.fonts.ready")
+
+                    font_status = await page.evaluate("""
+                        () => {
+                            const fonts = [...document.fonts].map(f => ({
+                                family: f.family,
+                                weight: f.weight,
+                                style: f.style,
+                                status: f.status,
+                                unicodeRange: f.unicodeRange,
+                            }));
+                            const el = document.getElementById('test');
+                            const computed = window.getComputedStyle(el).fontFamily;
+                            return {
+                                registeredFonts: fonts,
+                                computedFontFamily: computed,
+                                fontsSize: document.fonts.size,
+                            };
+                        }
+                    """)
+                    info["playwright_font_status"] = font_status
+                finally:
+                    await context.close()
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+        return info
 
 
 # Singleton instance used by the app

@@ -144,6 +144,15 @@ async def test_font():
     return Response(content=png_bytes, media_type="image/png")
 
 
+@router.get("/test-font-debug")
+async def test_font_debug():
+    """Returns JSON diagnostics about font loading on this server.
+    Opens directly: https://takiapp-production.up.railway.app/api/test-font-debug
+    """
+    info = await renderer.get_font_debug_info()
+    return info
+
+
 @router.post("/projects/{project_id}/render-preview/{slide_id}")
 async def render_preview(project_id: str, slide_id: str):
     """Render a single slide and return PNG."""
