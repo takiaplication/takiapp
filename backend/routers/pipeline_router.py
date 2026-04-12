@@ -29,12 +29,27 @@ router = APIRouter(tags=["pipeline"])
 _queue: asyncio.Queue[str] = asyncio.Queue()
 _worker_task: Optional[asyncio.Task] = None
 
+# Hard guarantee: only one _run_pipeline may execute at a time, regardless of
+# how many worker tasks exist or how _ensure_worker is called.
+_pipeline_lock = asyncio.Lock()
+
+# Set of project IDs that are already in the queue (prevents duplicates).
+_queued_ids: set[str] = set()
+
 
 def _ensure_worker() -> None:
-    """Lazily start the background queue worker."""
+    """Lazily start the background queue worker.
+    Safe to call multiple times — only one worker task is ever alive."""
     global _worker_task
     if _worker_task is None or _worker_task.done():
         _worker_task = asyncio.create_task(_queue_worker())
+
+
+async def _safe_enqueue(project_id: str) -> None:
+    """Add project_id to the queue only if it is not already queued or processing."""
+    if project_id not in _queued_ids:
+        _queued_ids.add(project_id)
+        await _queue.put(project_id)
 
 
 async def _set_status(
@@ -137,13 +152,18 @@ async def _run_pipeline(project_id: str) -> None:
 # ── Queue worker ───────────────────────────────────────────────────────────────
 
 async def _queue_worker() -> None:
-    """Process projects one at a time from the queue."""
+    """Process projects strictly one at a time from the queue."""
     while True:
         project_id = await _queue.get()
+        _queued_ids.discard(project_id)
         try:
-            await _run_pipeline(project_id)
+            # _pipeline_lock ensures that even if a second worker task were
+            # ever started by accident, it cannot begin processing until the
+            # current project is fully finished.
+            async with _pipeline_lock:
+                await _run_pipeline(project_id)
         except Exception:
-            pass  # errors already handled in _run_pipeline
+            pass  # errors already handled inside _run_pipeline
         finally:
             _queue.task_done()
 
@@ -196,7 +216,7 @@ async def submit_pipeline(body: PipelineSubmitRequest):
         finally:
             await db.close()
 
-        await _queue.put(project_id)
+        await _safe_enqueue(project_id)
         created.append(project_id)
 
     _ensure_worker()
@@ -217,8 +237,16 @@ async def retry_pipeline(project_id: str):
     finally:
         await db.close()
 
+    # Refuse to re-queue if already in queue or actively processing —
+    # this prevents duplicate entries and parallel processing.
+    if row["status"] in ("queue", "processing"):
+        raise HTTPException(
+            status_code=409,
+            detail="Project is already queued or processing",
+        )
+
     await _set_status(project_id, "queue", "In wachtrij (opnieuw)…", "")
-    await _queue.put(project_id)
+    await _safe_enqueue(project_id)
     _ensure_worker()
     return {"ok": True}
 

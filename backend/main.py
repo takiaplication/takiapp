@@ -51,7 +51,7 @@ async def _recover_pipeline_queue() -> None:
     Processing always happens ONE AT A TIME through the single queue worker.
     """
     from database import get_db  # noqa: PLC0415
-    from routers.pipeline_router import _queue, _ensure_worker  # noqa: PLC0415
+    from routers.pipeline_router import _safe_enqueue, _ensure_worker  # noqa: PLC0415
 
     db = await get_db()
     try:
@@ -74,7 +74,7 @@ async def _recover_pipeline_queue() -> None:
         await db.close()
 
     for row in rows:
-        await _queue.put(row["id"])
+        await _safe_enqueue(row["id"])
 
     if rows:
         _ensure_worker()
