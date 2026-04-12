@@ -30,7 +30,9 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers (Chromium only to keep image lean)
-RUN playwright install chromium --with-deps
+RUN pip install playwright && \
+    playwright install chromium && \
+    playwright install-deps chromium
 
 # Copy backend source
 COPY backend/ ./backend/
