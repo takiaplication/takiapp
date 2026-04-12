@@ -123,6 +123,27 @@ async def _build_conversation_for_slide(project_id: str, slide_id: str) -> DMCon
         await db.close()
 
 
+@router.get("/test-font")
+async def test_font():
+    """GET this in a browser to see exactly what font Playwright renders.
+    Opens directly: https://takiapp-production.up.railway.app/api/test-font
+    """
+    from schemas.render import DMConversation, DMMessage
+    conversation = DMConversation(
+        contact_name="testuser",
+        contact_verified=False,
+        messages=[
+            DMMessage(text="This is SF Pro Text", is_sender=False),
+            DMMessage(text="Testing the font on Railway 😎🔥", is_sender=True),
+            DMMessage(text="ABCDEFGHIJKLMNOPQRSTUVWXYZ", is_sender=False),
+            DMMessage(text="abcdefghijklmnopqrstuvwxyz 0123456789", is_sender=True),
+        ],
+        theme="dark",
+    )
+    png_bytes = await renderer.render_slide(conversation)
+    return Response(content=png_bytes, media_type="image/png")
+
+
 @router.post("/projects/{project_id}/render-preview/{slide_id}")
 async def render_preview(project_id: str, slide_id: str):
     """Render a single slide and return PNG."""
