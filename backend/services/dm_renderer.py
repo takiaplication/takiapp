@@ -126,17 +126,21 @@ class DMRenderer:
             jitter=jitter,
         )
 
+        # Inject <base href> so relative font paths resolve from the project root.
+        # This is version-safe — no reliance on set_content(base_url=...).
+        html = html.replace(
+            "<head>",
+            f'<head>\n<base href="file://{BASE_DIR}/">',
+            1,
+        )
+
         context = await self._browser.new_context(
             viewport={"width": 1080, "height": 1920},
             device_scale_factor=1,
         )
         try:
             page = await context.new_page()
-            await page.set_content(
-                html,
-                wait_until="load",
-                base_url=f"file://{BASE_DIR}/",
-            )
+            await page.set_content(html, wait_until="load")
             # Small delay to let fonts settle
             await page.wait_for_timeout(100)
             png_bytes = await page.screenshot(type="png")
