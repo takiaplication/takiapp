@@ -133,8 +133,8 @@ class DMRenderer:
         try:
             page = await context.new_page()
             await page.set_content(html, wait_until="load")
-            # Small delay to let fonts settle
-            await page.wait_for_timeout(100)
+            # Wait for all @font-face fonts (including base64 data: URIs) to fully load
+            await page.evaluate("document.fonts.ready")
             png_bytes = await page.screenshot(type="png")
             return png_bytes
         finally:
