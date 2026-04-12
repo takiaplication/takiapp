@@ -1,8 +1,7 @@
 """
 Translation via OpenAI GPT-4o-mini.
 Falls back to returning the original text if no API key is configured.
-The API key is loaded at call-time from the app_settings table so the user
-can update it without restarting the server.
+The API key is read from the OPENAI_API_KEY environment variable.
 """
 
 import asyncio
@@ -11,20 +10,7 @@ from typing import Optional
 
 
 async def _get_api_key() -> str:
-    """Resolve the OpenAI API key: DB first, then OPENAI_API_KEY env var."""
-    try:
-        from database import get_db  # noqa: PLC0415
-        db = await get_db()
-        try:
-            row = await (await db.execute(
-                "SELECT openai_api_key FROM app_settings WHERE id=1"
-            )).fetchone()
-            if row and row["openai_api_key"]:
-                return row["openai_api_key"]
-        finally:
-            await db.close()
-    except Exception:
-        pass
+    """Read OpenAI key from OPENAI_API_KEY environment variable."""
     return os.getenv("OPENAI_API_KEY", "")
 
 

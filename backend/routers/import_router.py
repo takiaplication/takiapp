@@ -321,24 +321,9 @@ async def run_ocr_pipeline(project_id: str, progress_callback) -> dict:
         # Fallback path — EasyOCR + coordinate-based classification +
         #                 GPT-4o-mini translation (separate calls, slower).
 
-        # Resolve API key (same helper used by translation & classifier)
-        _ocr_api_key = ""
-        try:
-            from database import get_db as _get_db2  # noqa: PLC0415
-            _db_tmp = await _get_db2()
-            try:
-                _row = await (await _db_tmp.execute(
-                    "SELECT openai_api_key FROM app_settings WHERE id=1"
-                )).fetchone()
-                if _row and _row["openai_api_key"]:
-                    _ocr_api_key = _row["openai_api_key"]
-            finally:
-                await _db_tmp.close()
-        except Exception:
-            pass
-        if not _ocr_api_key:
-            import os as _os
-            _ocr_api_key = _os.getenv("OPENAI_API_KEY", "")
+        # Resolve API key from environment variable
+        import os as _os
+        _ocr_api_key = _os.getenv("OPENAI_API_KEY", "")
 
         if _ocr_api_key:
             # ── Primary: GPT-4o vision ──────────────────────────────

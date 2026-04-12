@@ -260,17 +260,5 @@ export async function reexportProject(projectId: string): Promise<void> {
 }
 
 // --- Global app settings ---
-
-export interface AppSettings {
-  openai_api_key: string
-}
-
-export async function getAppSettings(): Promise<AppSettings> {
-  const res = await api.get('/settings')
-  return res.data
-}
-
-export async function saveAppSettings(s: AppSettings): Promise<AppSettings> {
-  const res = await api.put('/settings', s)
-  return res.data
-}
+// The OpenAI API key is now set via the OPENAI_API_KEY environment variable
+// on Railway. There is no longer a UI for entering it.

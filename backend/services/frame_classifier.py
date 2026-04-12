@@ -24,20 +24,7 @@ MemeCategory = Literal["opening", "sport", "coocked", "cooking", "shoot_our_shot
 # ── API key helper ────────────────────────────────────────────────────────────
 
 async def _get_api_key() -> str:
-    """Resolve OpenAI key: DB first, then OPENAI_API_KEY env var."""
-    try:
-        from database import get_db  # noqa: PLC0415
-        db = await get_db()
-        try:
-            row = await (await db.execute(
-                "SELECT openai_api_key FROM app_settings WHERE id=1"
-            )).fetchone()
-            if row and row["openai_api_key"]:
-                return row["openai_api_key"]
-        finally:
-            await db.close()
-    except Exception:
-        pass
+    """Read OpenAI key from OPENAI_API_KEY environment variable."""
     return os.getenv("OPENAI_API_KEY", "")
 
 
