@@ -15,7 +15,7 @@
 <style>
 @font-face {
     font-family: "SF Pro";
-    src: url("fonts/SF-Pro-Text-Regular.otf") format("opentype");
+    src: url("http://dm-assets/fonts/SF-Pro-Text-Regular.otf") format("opentype");
     font-weight: 400;
     font-style: normal;
 }
@@ -34,6 +34,16 @@ html, body {
     overflow: hidden;
     font-family: 'SF Pro', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
     -webkit-font-smoothing: antialiased;
+}
+
+
+/* ===== TWEMOJI SIZE FIX ===== */
+img.emoji {
+    height: 1em !important;
+    width: 1em !important;
+    display: inline !important;
+    vertical-align: -0.1em !important;
+    margin: 0 !important;
 }
 
 html.dark {
