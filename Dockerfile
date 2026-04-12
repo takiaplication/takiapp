@@ -38,9 +38,6 @@ COPY backend/ ./backend/
 # Copy built frontend into backend/static/dist so FastAPI can serve it
 COPY --from=frontend-builder /app/frontend/dist ./backend/static/dist
 
-# Copy shared assets (templates, fonts, public)
-COPY public/ ./public/
-
 # Storage dir is a Railway volume — just pre-create the skeleton so the
 # app starts cleanly even without a mounted volume.
 RUN mkdir -p storage/projects storage/meme_library
