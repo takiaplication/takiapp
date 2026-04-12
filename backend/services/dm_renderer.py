@@ -1,12 +1,14 @@
 import asyncio
 import os
 import random
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Optional
 from playwright.async_api import async_playwright, Playwright, Browser
 from jinja2 import Environment, FileSystemLoader
 
-from config import TEMPLATES_DIR
+from config import TEMPLATES_DIR, FONTS_DIR
 from schemas.render import DMConversation, DMMessage
 
 
@@ -126,19 +128,32 @@ class DMRenderer:
             jitter=jitter,
         )
 
-        context = await self._browser.new_context(
-            viewport={"width": 1080, "height": 1920},
-            device_scale_factor=1,
-        )
+        # Write HTML + font into a temp dir so Chromium can load the font via
+        # file:// without any cross-origin restrictions (same dir = same origin).
+        tmpdir = tempfile.mkdtemp(prefix="dm_render_")
         try:
-            page = await context.new_page()
-            await page.set_content(html, wait_until="load")
-            # Wait for all @font-face fonts (including base64 data: URIs) to fully load
-            await page.evaluate("document.fonts.ready")
-            png_bytes = await page.screenshot(type="png")
-            return png_bytes
+            # Copy WOFF2 font next to the HTML so the relative URL resolves
+            font_src = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
+            if font_src.exists():
+                shutil.copy(font_src, tmpdir)
+
+            html_path = Path(tmpdir) / "slide.html"
+            html_path.write_text(html, encoding="utf-8")
+
+            context = await self._browser.new_context(
+                viewport={"width": 1080, "height": 1920},
+                device_scale_factor=1,
+            )
+            try:
+                page = await context.new_page()
+                await page.goto(f"file://{html_path}", wait_until="load")
+                await page.evaluate("document.fonts.ready")
+                png_bytes = await page.screenshot(type="png")
+                return png_bytes
+            finally:
+                await context.close()
         finally:
-            await context.close()
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # Singleton instance used by the app
