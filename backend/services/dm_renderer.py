@@ -3,10 +3,10 @@ import os
 import random
 from pathlib import Path
 from typing import Optional
-from playwright.async_api import async_playwright, Playwright, Browser, Route, Request
+from playwright.async_api import async_playwright, Playwright, Browser
 from jinja2 import Environment, FileSystemLoader
 
-from config import TEMPLATES_DIR, BASE_DIR
+from config import TEMPLATES_DIR
 from schemas.render import DMConversation, DMMessage
 
 
@@ -126,36 +126,12 @@ class DMRenderer:
             jitter=jitter,
         )
 
-        # Fonts are served via page.route() — no <base href> needed.
-        fonts_dir = BASE_DIR / "fonts"
-        print(f"[DMRenderer] fonts_dir={fonts_dir} exists={fonts_dir.exists()}")
-        for f in fonts_dir.glob("*.otf") if fonts_dir.exists() else []:
-            print(f"[DMRenderer]   found font: {f.name}")
-
         context = await self._browser.new_context(
             viewport={"width": 1080, "height": 1920},
             device_scale_factor=1,
         )
         try:
             page = await context.new_page()
-
-            # Intercept font requests and serve directly from disk.
-            # This bypasses Chromium's file:// security restrictions on about:blank.
-            async def serve_font(route: Route, request: Request) -> None:
-                url = request.url
-                filename = url.split("/")[-1].split("?")[0]
-                font_path = fonts_dir / filename
-                print(f"[DMRenderer] font request: {url} → {font_path} exists={font_path.exists()}")
-                if font_path.exists():
-                    await route.fulfill(
-                        body=font_path.read_bytes(),
-                        content_type="font/otf",
-                        headers={"Access-Control-Allow-Origin": "*"},
-                    )
-                else:
-                    await route.abort()
-
-            await page.route("http://dm-assets/fonts/**", serve_font)
             await page.set_content(html, wait_until="load")
             # Small delay to let fonts settle
             await page.wait_for_timeout(100)

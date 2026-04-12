@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     fonts-liberation \
     fonts-noto-color-emoji \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify system Chromium is present and expose its path to the app
@@ -60,8 +61,10 @@ WORKDIR /app
 # Copy backend source
 COPY backend/ ./backend/
 
-# Copy SF Pro fonts (used by Playwright DM renderer)
+# Install SF Pro fonts at OS level so Playwright/Chromium finds them automatically
 COPY fonts/ ./fonts/
+COPY fonts/ /usr/local/share/fonts/custom/
+RUN fc-cache -fv
 
 # Copy built frontend dist so FastAPI can serve it as static files
 COPY --from=frontend-builder /app/frontend/dist ./backend/static/dist
