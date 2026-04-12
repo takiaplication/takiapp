@@ -42,11 +42,50 @@ async def _recover_stuck_exports() -> None:
                 pass  # will surface as error in the job
 
 
+async def _recover_pipeline_queue() -> None:
+    """
+    On startup: re-queue projects that were in 'queue' or 'processing' when the
+    server last shut down.  'processing' projects are reset to 'queue' so they
+    restart cleanly from the beginning.  Projects are re-enqueued in the order
+    they were originally created so the sequence is preserved.
+    Processing always happens ONE AT A TIME through the single queue worker.
+    """
+    from database import get_db  # noqa: PLC0415
+    from routers.pipeline_router import _queue, _ensure_worker  # noqa: PLC0415
+
+    db = await get_db()
+    try:
+        # Reset any half-finished 'processing' projects back to 'queue'
+        await db.execute(
+            """UPDATE projects
+               SET status='queue', pipeline_step='In wachtrij…',
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE status='processing'""",
+        )
+        await db.commit()
+
+        # Collect all queued projects in submission order
+        rows = await (await db.execute(
+            """SELECT id FROM projects
+               WHERE status='queue'
+               ORDER BY created_at ASC"""
+        )).fetchall()
+    finally:
+        await db.close()
+
+    for row in rows:
+        await _queue.put(row["id"])
+
+    if rows:
+        _ensure_worker()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await renderer.start()
     await _recover_stuck_exports()
+    await _recover_pipeline_queue()
     yield
     await renderer.stop()
 
