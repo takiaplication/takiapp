@@ -1,0 +1,23 @@
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.Python
+backend/reelfactory.db
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# Storage (mounted as Railway volume at runtime)
+storage/
+
+# Git / editor
+.git/
+.gitignore
+.DS_Store
+.claude/
+
+# Misc
+**/*.log
