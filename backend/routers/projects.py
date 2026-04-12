@@ -1,6 +1,7 @@
 import uuid
 import shutil
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 
 from database import get_db
@@ -10,7 +11,7 @@ from schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, Libra
 router = APIRouter(tags=["projects"])
 
 
-def _thumb_to_url(thumb_path: str | None) -> str | None:
+def _thumb_to_url(thumb_path: Optional[str]) -> Optional[str]:
     """Convert an absolute thumbnail_path to a /files/… URL."""
     if not thumb_path or not Path(thumb_path).exists():
         return None
