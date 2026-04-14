@@ -37,14 +37,7 @@ html, body {
 }
 
 
-/* ===== TWEMOJI SIZE FIX ===== */
-img.emoji {
-    height: 1em !important;
-    width: 1em !important;
-    display: inline !important;
-    vertical-align: -0.1em !important;
-    margin: 0 !important;
-}
+/* Emoji rendered natively via Apple Color Emoji system font (CBDT/CBLC) */
 
 html.dark {
     --bg: #000000;
@@ -285,12 +278,6 @@ body {
 </div>
 
 
-<script src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/dist/twemoji.min.js" crossorigin="anonymous"></script>
-<script>
-  document.addEventListener("DOMContentLoaded", function() {
-    twemoji.parse(document.body, { folder: "svg", ext: ".svg" });
-  });
-</script>
 
 </body>
 </html>
