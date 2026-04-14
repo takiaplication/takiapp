@@ -43,7 +43,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 \
     libgbm1 \
     fonts-liberation \
-    fonts-noto-color-emoji \
     fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
