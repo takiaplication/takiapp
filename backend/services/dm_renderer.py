@@ -86,7 +86,6 @@ class DMRenderer:
     def __init__(self):
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
-        self._font_b64: Optional[str] = None
         self._jinja_env = Environment(
             loader=FileSystemLoader(str(TEMPLATES_DIR)),
             autoescape=False,
@@ -111,19 +110,13 @@ class DMRenderer:
             ],
         )
 
-        # Pre-load font as base64 at startup.  Prefer the ORIGINAL Apple OTF
-        # (guaranteed-uncorrupted glyphs) over the fonttools-converted WOFF2.
-        self._font_format = None
-        otf_path = FONTS_DIR / "SF-Pro-Text-Regular.otf"
-        woff2_path = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
-        if otf_path.exists():
-            self._font_b64 = base64.b64encode(otf_path.read_bytes()).decode()
-            self._font_format = "otf"
-            print(f"[DMRenderer] Loaded SF Pro Text OTF ({otf_path.stat().st_size} bytes)")
-        elif woff2_path.exists():
-            self._font_b64 = base64.b64encode(woff2_path.read_bytes()).decode()
-            self._font_format = "woff2"
-            print(f"[DMRenderer] Loaded SF Pro Text WOFF2 ({woff2_path.stat().st_size} bytes)")
+        # Verify font files exist at startup
+        woff2 = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
+        otf = FONTS_DIR / "SF-Pro-Text-Regular.otf"
+        if woff2.exists():
+            print(f"[DMRenderer] SF Pro Text WOFF2 ready ({woff2.stat().st_size} bytes)")
+        elif otf.exists():
+            print(f"[DMRenderer] SF Pro Text OTF ready ({otf.stat().st_size} bytes)")
         else:
             print(f"[DMRenderer] WARNING: No SF Pro font found in {FONTS_DIR}")
 
@@ -155,31 +148,23 @@ class DMRenderer:
             jitter=jitter,
         )
 
-        # BELT: Inject font as base64 data URI directly into the HTML.
-        # This guarantees the font bytes are part of the document itself —
-        # no file loading, no network loading, no CORS, no origin issues.
-        if self._font_b64:
-            if self._font_format == "otf":
-                mime = "font/otf"
-                fmt = "opentype"
-            else:
-                mime = "font/woff2"
-                fmt = "woff2"
-            data_uri = f'url("data:{mime};base64,{self._font_b64}") format("{fmt}")'
-            html = html.replace(
-                'url("SF-Pro-Text-Regular.woff2") format("woff2")',
-                data_uri,
-            )
+        # No base64 injection — too memory-heavy for Railway (causes OOM).
+        # Instead, copy the font file to the temp dir next to the HTML.
+        # Chromium loads it via file:// with the relative URL in the CSS.
 
-        # Write to temp file and use page.goto(file://) — file:// origin is
-        # more permissive than about:blank for resource loading.
         tmpdir = tempfile.mkdtemp(prefix="dm_render_")
         try:
-            # SUSPENDERS: Also copy the WOFF2 file next to the HTML as a
-            # fallback in case the base64 injection somehow fails.
+            # Copy font file next to HTML so the relative URL resolves.
+            # Prefer WOFF2 (smaller, matches template CSS), fall back to OTF.
             font_src = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
             if font_src.exists():
                 shutil.copy(font_src, tmpdir)
+            else:
+                # Copy OTF and also create the woff2 filename as a copy
+                # so the CSS url("SF-Pro-Text-Regular.woff2") still resolves
+                otf_src = FONTS_DIR / "SF-Pro-Text-Regular.otf"
+                if otf_src.exists():
+                    shutil.copy(otf_src, Path(tmpdir) / "SF-Pro-Text-Regular.woff2")
 
             html_path = Path(tmpdir) / "slide.html"
             html_path.write_text(html, encoding="utf-8")
@@ -193,12 +178,10 @@ class DMRenderer:
                 await page.goto(f"file://{html_path}", wait_until="load")
 
                 # Wait for the font to be fully decoded and applied, then
-                # force a layout reflow so Chromium re-rasterises all text
-                # with the correct typeface.
+                # force a layout reflow so Chromium re-rasterises all text.
                 await page.evaluate("""
                     async () => {
                         await document.fonts.ready;
-                        // Force layout reflow
                         document.body.offsetHeight;
                     }
                 """)
@@ -222,32 +205,32 @@ class DMRenderer:
             "woff2_exists": font_woff2.exists(),
             "woff2_size": font_woff2.stat().st_size if font_woff2.exists() else 0,
             "otf_exists": font_otf.exists(),
-            "font_b64_loaded": self._font_b64 is not None,
-            "font_b64_length": len(self._font_b64) if self._font_b64 else 0,
             "fonts_dir_contents": sorted(
                 f.name for f in FONTS_DIR.iterdir()
             ) if FONTS_DIR.exists() else [],
         }
 
-        # Test actual font loading in Playwright
-        if self._font_b64 and self._browser:
-            mime = "font/otf" if self._font_format == "otf" else "font/woff2"
-            fmt = "opentype" if self._font_format == "otf" else "woff2"
-            test_html = f"""<!DOCTYPE html>
-            <html><head><style>
-            @font-face {{
-                font-family: "SF Pro Text";
-                src: url("data:{mime};base64,{self._font_b64}") format("{fmt}");
-                font-weight: 400;
-                font-style: normal;
-                font-display: block;
-            }}
-            body {{ font-family: 'SF Pro Text', sans-serif; font-size: 48px; }}
-            </style></head>
-            <body><p id="test">ABCabc123</p></body></html>"""
-
+        # Test font loading in Playwright using the same file:// approach
+        if self._browser:
             tmpdir = tempfile.mkdtemp(prefix="dm_debug_")
             try:
+                # Copy font to temp dir
+                if font_woff2.exists():
+                    shutil.copy(font_woff2, tmpdir)
+
+                test_html = """<!DOCTYPE html>
+                <html><head><style>
+                @font-face {
+                    font-family: "SF Pro Text";
+                    src: url("SF-Pro-Text-Regular.woff2") format("woff2");
+                    font-weight: 400;
+                    font-style: normal;
+                    font-display: block;
+                }
+                body { font-family: 'SF Pro Text', sans-serif; font-size: 48px; }
+                </style></head>
+                <body><p id="test">ABCabc123</p></body></html>"""
+
                 html_path = Path(tmpdir) / "debug.html"
                 html_path.write_text(test_html, encoding="utf-8")
 
@@ -266,7 +249,6 @@ class DMRenderer:
                                 weight: f.weight,
                                 style: f.style,
                                 status: f.status,
-                                unicodeRange: f.unicodeRange,
                             }));
                             const el = document.getElementById('test');
                             const computed = window.getComputedStyle(el).fontFamily;
