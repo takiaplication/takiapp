@@ -105,25 +105,27 @@ class DMRenderer:
                 "--disable-setuid-sandbox",
                 "--allow-file-access-from-files",
                 "--disable-web-security",
-                "--font-render-hinting=none",
+                "--font-render-hinting=medium",
+                "--disable-lcd-text",
+                "--force-color-profile=srgb",
             ],
         )
 
-        # Pre-load font as base64 at startup so we can inject it into every
-        # rendered HTML — guarantees the font is available regardless of how
-        # Chromium resolves file:// or data: URIs.
-        font_path = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
-        if font_path.exists():
-            self._font_b64 = base64.b64encode(font_path.read_bytes()).decode()
-            print(f"[DMRenderer] Loaded SF Pro Text WOFF2 ({font_path.stat().st_size} bytes)")
+        # Pre-load font as base64 at startup.  Prefer the ORIGINAL Apple OTF
+        # (guaranteed-uncorrupted glyphs) over the fonttools-converted WOFF2.
+        self._font_format = None
+        otf_path = FONTS_DIR / "SF-Pro-Text-Regular.otf"
+        woff2_path = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
+        if otf_path.exists():
+            self._font_b64 = base64.b64encode(otf_path.read_bytes()).decode()
+            self._font_format = "otf"
+            print(f"[DMRenderer] Loaded SF Pro Text OTF ({otf_path.stat().st_size} bytes)")
+        elif woff2_path.exists():
+            self._font_b64 = base64.b64encode(woff2_path.read_bytes()).decode()
+            self._font_format = "woff2"
+            print(f"[DMRenderer] Loaded SF Pro Text WOFF2 ({woff2_path.stat().st_size} bytes)")
         else:
-            # Fallback: try the OTF file
-            otf_path = FONTS_DIR / "SF-Pro-Text-Regular.otf"
-            if otf_path.exists():
-                self._font_b64 = base64.b64encode(otf_path.read_bytes()).decode()
-                print(f"[DMRenderer] Loaded SF Pro Text OTF fallback ({otf_path.stat().st_size} bytes)")
-            else:
-                print(f"[DMRenderer] WARNING: No SF Pro font found in {FONTS_DIR}")
+            print(f"[DMRenderer] WARNING: No SF Pro font found in {FONTS_DIR}")
 
     async def stop(self):
         if self._browser:
@@ -157,11 +159,13 @@ class DMRenderer:
         # This guarantees the font bytes are part of the document itself —
         # no file loading, no network loading, no CORS, no origin issues.
         if self._font_b64:
-            font_ext = "woff2"
-            font_path = FONTS_DIR / "SF-Pro-Text-Regular.woff2"
-            if not font_path.exists():
-                font_ext = "otf"
-            data_uri = f'url("data:font/{font_ext};base64,{self._font_b64}") format("{"woff2" if font_ext == "woff2" else "opentype"}")'
+            if self._font_format == "otf":
+                mime = "font/otf"
+                fmt = "opentype"
+            else:
+                mime = "font/woff2"
+                fmt = "woff2"
+            data_uri = f'url("data:{mime};base64,{self._font_b64}") format("{fmt}")'
             html = html.replace(
                 'url("SF-Pro-Text-Regular.woff2") format("woff2")',
                 data_uri,
@@ -227,11 +231,13 @@ class DMRenderer:
 
         # Test actual font loading in Playwright
         if self._font_b64 and self._browser:
+            mime = "font/otf" if self._font_format == "otf" else "font/woff2"
+            fmt = "opentype" if self._font_format == "otf" else "woff2"
             test_html = f"""<!DOCTYPE html>
             <html><head><style>
             @font-face {{
                 font-family: "SF Pro Text";
-                src: url("data:font/woff2;base64,{self._font_b64}") format("woff2");
+                src: url("data:{mime};base64,{self._font_b64}") format("{fmt}");
                 font-weight: 400;
                 font-style: normal;
                 font-display: block;
