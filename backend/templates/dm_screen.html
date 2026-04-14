@@ -25,19 +25,26 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-family: 'SF Pro Text', 'Apple Color Emoji', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
 }
 
 html, body {
     width: 1080px;
     height: 1920px;
     overflow: hidden;
-    font-family: 'SF Pro Text', 'Apple Color Emoji', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
+    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
     -webkit-font-smoothing: antialiased;
 }
 
 
-/* Emojis are rendered natively via Apple Color Emoji font (installed at OS level) */
+/* ===== TWEMOJI SIZE FIX ===== */
+img.emoji {
+    height: 1em !important;
+    width: 1em !important;
+    display: inline !important;
+    vertical-align: -0.1em !important;
+    margin: 0 !important;
+}
 
 html.dark {
     --bg: #000000;
@@ -277,6 +284,13 @@ body {
     {% endif %}
 </div>
 
+
+<script src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/dist/twemoji.min.js" crossorigin="anonymous"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    twemoji.parse(document.body, { folder: "svg", ext: ".svg" });
+  });
+</script>
 
 </body>
 </html>
