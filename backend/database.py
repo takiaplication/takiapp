@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS messages (
     read_receipt TEXT,
     emoji_reaction TEXT,
     story_image_path TEXT,
-    story_reply_label TEXT
+    story_reply_label TEXT,
+    content_hash TEXT,
+    story_group_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS render_settings (
@@ -102,6 +104,8 @@ async def init_db():
             ("projects", "pipeline_step", "TEXT"),
             ("projects", "pipeline_error", "TEXT"),
             ("projects", "thumbnail_path", "TEXT"),
+            ("messages", "content_hash", "TEXT"),
+            ("messages", "story_group_id", "TEXT"),
         ]
         for table, col, definition in migrations:
             try:

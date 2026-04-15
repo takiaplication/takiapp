@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -37,6 +38,20 @@ def _to_url_path(abs_path: Optional[str]) -> Optional[str]:
         return None
 
 router = APIRouter(tags=["import"])
+
+
+def _content_hash(sender: str, text: str) -> str:
+    """Deterministic short hash — identical sender+text across slides share the same hash."""
+    key = f"{sender}|{text.strip()}".encode()
+    return hashlib.sha256(key).hexdigest()[:12]
+
+
+def _story_group(has_story_reply: bool, first_msg_text: str) -> Optional[str]:
+    """Group ID for story replies — slides with the same story share one group."""
+    if not has_story_reply:
+        return None
+    key = f"story|{first_msg_text.strip()}".encode()
+    return hashlib.sha256(key).hexdigest()[:12]
 
 
 class ImportUrlRequest(BaseModel):
@@ -349,20 +364,24 @@ async def run_ocr_pipeline(project_id: str, progress_callback) -> dict:
             messages[0]["story_reply_label"] = "Reageerde op je verhaal"
         # ── end OCR ───────────────────────────────────────────────
 
+        # Compute story_group_id for this slide (if it has a story reply)
+        sg_id = _story_group(has_story_reply, messages[0]["text"]) if messages else None
+
         db3 = await get_db()
         try:
             await db3.execute("DELETE FROM messages WHERE slide_id=?", (slide_id,))
             for sort_i, m in enumerate(messages):
                 msg_type = m.get("message_type", "text")
                 label    = m.get("story_reply_label")
+                c_hash   = _content_hash(m["sender"], m["text"])
                 await db3.execute(
                     """INSERT INTO messages
                        (id, slide_id, sort_order, sender, text, message_type,
                         show_timestamp, timestamp_text, read_receipt, emoji_reaction,
-                        story_image_path, story_reply_label)
-                       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, ?)""",
+                        story_image_path, story_reply_label, content_hash, story_group_id)
+                       VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, ?, ?, ?)""",
                     (str(uuid.uuid4()), slide_id, sort_i,
-                     m["sender"], m["text"], msg_type, label),
+                     m["sender"], m["text"], msg_type, label, c_hash, sg_id),
                 )
             await db3.commit()
         finally:
@@ -475,17 +494,19 @@ async def run_ocr_pipeline(project_id: str, progress_callback) -> dict:
         ]
         consistent = await batch_translate_conversation(payload)
 
-        # Write back only changed texts
+        # Write back changed texts + recompute content_hash
         db_batch2 = await get_db()
         try:
             changed = [
-                (c["text"], c["msg_id"])
+                (c["text"], c["sender"], c["msg_id"])
                 for orig, c in zip(payload, consistent)
                 if orig["text"] != c["text"]
             ]
-            for new_text, msg_id in changed:
+            for new_text, sender, msg_id in changed:
+                new_hash = _content_hash(sender, new_text)
                 await db_batch2.execute(
-                    "UPDATE messages SET text=? WHERE id=?", (new_text, msg_id)
+                    "UPDATE messages SET text=?, content_hash=? WHERE id=?",
+                    (new_text, new_hash, msg_id),
                 )
             if changed:
                 await db_batch2.commit()

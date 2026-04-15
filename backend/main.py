@@ -82,6 +82,10 @@ async def _recover_pipeline_queue() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from config import STORAGE_DIR, DATABASE_PATH, PROJECTS_DIR  # noqa: PLC0415
+    print(f"[startup] STORAGE_DIR  = {STORAGE_DIR}")
+    print(f"[startup] DATABASE     = {DATABASE_PATH}")
+    print(f"[startup] PROJECTS_DIR = {PROJECTS_DIR}")
     await init_db()
     await renderer.start()
     await _recover_stuck_exports()

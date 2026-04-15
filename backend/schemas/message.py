@@ -12,6 +12,7 @@ class MessageCreate(BaseModel):
     emoji_reaction: Optional[str] = None
     story_image_path: Optional[str] = None
     story_reply_label: Optional[str] = None
+    story_group_id: Optional[str] = None
 
 
 class MessageUpdate(BaseModel):
@@ -39,3 +40,5 @@ class MessageResponse(BaseModel):
     emoji_reaction: Optional[str] = None
     story_image_path: Optional[str] = None
     story_reply_label: Optional[str] = None
+    content_hash: Optional[str] = None
+    story_group_id: Optional[str] = None

@@ -319,6 +319,8 @@ export default function DMEditor() {
       emoji_reaction: null,
       story_image_path: null,
       story_reply_label: null,
+      content_hash: null,
+      story_group_id: null,
     }
     setMessages([...messages, newMsg])
   }
@@ -338,6 +340,8 @@ export default function DMEditor() {
       emoji_reaction: null,
       story_image_path: null,
       story_reply_label: label,
+      content_hash: null,
+      story_group_id: null,
     }
     setMessages([...messages, newMsg])
   }

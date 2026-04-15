@@ -49,7 +49,7 @@ export async function getMessages(projectId: string, slideId: string): Promise<M
   return res.data
 }
 
-export async function replaceMessages(projectId: string, slideId: string, messages: Omit<Message, 'id' | 'slide_id' | 'sort_order'>[]): Promise<void> {
+export async function replaceMessages(projectId: string, slideId: string, messages: Omit<Message, 'id' | 'slide_id' | 'sort_order' | 'content_hash'>[]): Promise<void> {
   await api.put(`/projects/${projectId}/slides/${slideId}/messages`, messages)
 }
 

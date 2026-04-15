@@ -147,8 +147,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   saveMessages: async () => {
     const { currentProject, activeSlideId, messages } = get()
     if (!currentProject || !activeSlideId) return
-    const stripped = messages.map(({ sender, text, message_type, show_timestamp, timestamp_text, read_receipt, emoji_reaction, story_image_path, story_reply_label }) => ({
-      sender, text, message_type, show_timestamp, timestamp_text, read_receipt, emoji_reaction, story_image_path, story_reply_label,
+    const stripped = messages.map(({ sender, text, message_type, show_timestamp, timestamp_text, read_receipt, emoji_reaction, story_image_path, story_reply_label, story_group_id }) => ({
+      sender, text, message_type, show_timestamp, timestamp_text, read_receipt, emoji_reaction, story_image_path, story_reply_label, story_group_id,
     }))
     await projectsApi.replaceMessages(currentProject.id, activeSlideId, stripped)
   },

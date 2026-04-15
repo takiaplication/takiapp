@@ -45,6 +45,8 @@ export interface Message {
   emoji_reaction: string | null
   story_image_path: string | null
   story_reply_label: string | null
+  content_hash: string | null
+  story_group_id: string | null
 }
 
 export interface RenderSettings {

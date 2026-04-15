@@ -68,8 +68,9 @@ RUN fc-cache -fv
 # Copy built frontend dist so FastAPI can serve it as static files
 COPY --from=frontend-builder /app/frontend/dist ./backend/static/dist
 
-# Pre-create storage skeleton (Railway volume mounts over /app/storage)
-RUN mkdir -p storage/projects storage/meme_library
+# Point all persistent data (DB, projects, memes) at the Railway volume mount.
+# The Python config.py reads this env var and creates subdirectories on startup.
+ENV STORAGE_PATH=/app/storage
 
 EXPOSE 8000
 
