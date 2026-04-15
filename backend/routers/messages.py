@@ -35,7 +35,14 @@ async def list_messages(project_id: str, slide_id: str):
 async def replace_messages(project_id: str, slide_id: str, messages: list[MessageCreate]):
     db = await get_db()
     try:
-        # ── 1. Delete old, insert new with content_hash
+        # ── 1. Snapshot old messages (need content_hash for cross-slide sync)
+        old_cursor = await db.execute(
+            "SELECT sort_order, sender, text, content_hash FROM messages WHERE slide_id=? ORDER BY sort_order",
+            (slide_id,),
+        )
+        old_msgs = [dict(r) for r in await old_cursor.fetchall()]
+
+        # ── 2. Delete old, insert new with content_hash
         await db.execute("DELETE FROM messages WHERE slide_id=?", (slide_id,))
 
         for i, msg in enumerate(messages):
@@ -54,20 +61,46 @@ async def replace_messages(project_id: str, slide_id: str, messages: list[Messag
                 ),
             )
 
-        # ── 2. Cross-slide sync: story images via story_group_id
-        #    When a story image is set on this slide, propagate it to all
-        #    other slides that share the same story_group_id.
+        # ── 3. Cross-slide sync: text changes via content_hash
+        #    Match old→new by sort_order. If text/sender changed, update all
+        #    sibling messages on other slides that share the old content_hash.
+        for i, msg in enumerate(messages):
+            if i >= len(old_msgs):
+                break
+            old = old_msgs[i]
+            old_hash = old.get("content_hash")
+            if not old_hash:
+                continue
+            if msg.text != old["text"] or msg.sender != old["sender"]:
+                new_hash = _content_hash(msg.sender, msg.text)
+                sib_cursor = await db.execute(
+                    """SELECT m.id, m.slide_id FROM messages m
+                       JOIN slides s ON s.id = m.slide_id
+                       WHERE s.project_id=? AND m.content_hash=? AND m.slide_id!=?""",
+                    (project_id, old_hash, slide_id),
+                )
+                for sib in await sib_cursor.fetchall():
+                    await db.execute(
+                        "UPDATE messages SET text=?, sender=?, content_hash=? WHERE id=?",
+                        (msg.text, msg.sender, new_hash, sib["id"]),
+                    )
+                    await db.execute(
+                        "UPDATE slides SET rendered_path=NULL WHERE id=?",
+                        (sib["slide_id"],),
+                    )
+
+        # ── 4. Cross-slide sync: story images via story_group_id
         for msg in messages:
             sg_id = getattr(msg, "story_group_id", None)
             if sg_id and msg.story_image_path:
                 await db.execute(
                     """UPDATE messages SET story_image_path=?
-                       WHERE story_group_id=? AND slide_id IN (
+                       WHERE story_group_id=? AND message_type='story_reply'
+                       AND slide_id IN (
                            SELECT id FROM slides WHERE project_id=?
                        ) AND slide_id!=?""",
                     (msg.story_image_path, sg_id, project_id, slide_id),
                 )
-                # Invalidate those slides' renders
                 await db.execute(
                     """UPDATE slides SET rendered_path=NULL
                        WHERE id IN (
@@ -192,7 +225,8 @@ async def update_story_image(project_id: str, story_group_id: str, story_image_p
     try:
         await db.execute(
             """UPDATE messages SET story_image_path=?
-               WHERE story_group_id=? AND slide_id IN (
+               WHERE story_group_id=? AND message_type='story_reply'
+               AND slide_id IN (
                    SELECT id FROM slides WHERE project_id=?
                )""",
             (story_image_path, story_group_id, project_id),

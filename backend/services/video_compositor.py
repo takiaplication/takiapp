@@ -190,6 +190,8 @@ async def compose_video(
     frame_list_path.write_text("\n".join(frame_entries))
 
     # Build ffmpeg command
+    has_music = bool(music_path and Path(music_path).exists())
+
     cmd = [
         "ffmpeg", "-y",
         "-f", "concat",
@@ -197,47 +199,43 @@ async def compose_video(
         "-i", str(frame_list_path),
     ]
 
-    if music_path and Path(music_path).exists():
+    if has_music:
         cmd.extend(["-i", music_path])
 
     # ── Video filter chain ─────────────────────────────────────────────────
-    # Base: fps + pixel format
     vf_parts = [f"fps={fps}"]
 
     if screen_recording_effect:
-        # Simulate someone holding a phone and screen-recording their DMs:
-        #   • Subtle random crop offset (±2px) → micro camera shake
-        #   • Slight vignette (darker edges) → phone screen edges
-        #   • Very faint noise grain → not a perfect digital render
-        # The crop shrinks the canvas by 8px in each direction, then rescales
-        # back to 1080×1920 — imperceptible to viewers, fatal to fingerprinters.
         vf_parts += [
             "vignette=angle=PI/5:mode=forward",
-            "noise=alls=2:allf=t+u",     # tiny temporal+uniform noise grain
+            "noise=alls=2:allf=t+u",
         ]
 
     vf_parts.append("format=yuv420p")
     vf_filter = ",".join(vf_parts)
 
+    if has_music:
+        # Use a single -filter_complex for both video and audio to avoid
+        # the -vf + -filter_complex conflict that crashes ffmpeg.
+        cmd.extend([
+            "-filter_complex",
+            f"[0:v]{vf_filter}[vout];[1:a]volume={music_volume}[aout]",
+            "-map", "[vout]",
+            "-map", "[aout]",
+            "-shortest",
+        ])
+    else:
+        cmd.extend(["-vf", vf_filter])
+
     cmd.extend([
-        "-vf", vf_filter,
         "-c:v", "libx264",
         "-preset", "medium",
         "-crf", "23",
         "-r", str(fps),
-        # Strip ALL metadata (encoder tag, creation date, tool fingerprint)
         "-map_metadata", "-1",
         "-fflags", "+bitexact",
         "-flags:v", "+bitexact",
     ])
-
-    if music_path and Path(music_path).exists():
-        cmd.extend([
-            "-filter_complex", f"[1:a]volume={music_volume}[a]",
-            "-map", "0:v",
-            "-map", "[a]",
-            "-shortest",
-        ])
 
     cmd.append(str(output_path))
 
@@ -253,7 +251,10 @@ async def compose_video(
     stdout, stderr = await process.communicate()
 
     if process.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {stderr.decode()}")
+        # Show only the last 500 chars of stderr (the actual error,
+        # not the long ffmpeg version/config banner at the start).
+        err_tail = stderr.decode(errors="replace")[-500:]
+        raise RuntimeError(f"ffmpeg failed (exit {process.returncode}): ...{err_tail}")
 
     # Cleanup temp frames
     _shutil.rmtree(work_dir, ignore_errors=True)
