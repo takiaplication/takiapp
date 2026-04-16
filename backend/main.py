@@ -90,7 +90,20 @@ async def lifespan(app: FastAPI):
     await renderer.start()
     await _recover_stuck_exports()
     await _recover_pipeline_queue()
+
+    # Start Telegram bot (no-op if TELEGRAM_BOT_TOKEN is not set)
+    from services.telegram_bot import start_bot  # noqa: PLC0415
+    telegram_task = await start_bot()
+
     yield
+
+    # Graceful shutdown
+    if telegram_task and not telegram_task.done():
+        telegram_task.cancel()
+        try:
+            await telegram_task
+        except Exception:
+            pass
     await renderer.stop()
 
 
