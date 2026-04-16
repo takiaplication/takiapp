@@ -233,6 +233,7 @@ export interface LibraryItem {
   created_at: string
   thumbnail_url: string | null
   download_url: string
+  drive_url: string | null
 }
 
 export async function getLibrary(): Promise<LibraryItem[]> {

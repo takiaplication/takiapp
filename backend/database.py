@@ -104,6 +104,7 @@ async def init_db():
             ("projects", "pipeline_step", "TEXT"),
             ("projects", "pipeline_error", "TEXT"),
             ("projects", "thumbnail_path", "TEXT"),
+            ("projects", "drive_url", "TEXT"),
             ("messages", "content_hash", "TEXT"),
             ("messages", "story_group_id", "TEXT"),
         ]

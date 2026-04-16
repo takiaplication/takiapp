@@ -192,14 +192,31 @@ function ProjectCard({
       )}
 
       {isLibrary && (
-        <a
-          href={getExportDownloadUrl(project.id)}
-          download
-          onClick={(e) => e.stopPropagation()}
-          className="mt-1 flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium py-1.5 px-3 rounded-lg transition-colors"
-        >
-          ↓ Download MP4
-        </a>
+        <div className="mt-1 flex flex-col gap-1.5">
+          {project.drive_url ? (
+            <a
+              href={project.drive_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium py-1.5 px-3 rounded-lg transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6.28 3l5.72 9.9L6.28 21H2l5.72-9.9L2 3h4.28zm4.44 0H22l-5.72 9.9L22 21h-4.28l-5.72-9.9L14.72 3z"/>
+              </svg>
+              Open in Drive
+            </a>
+          ) : (
+            <a
+              href={getExportDownloadUrl(project.id)}
+              download
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium py-1.5 px-3 rounded-lg transition-colors"
+            >
+              ↓ Download MP4
+            </a>
+          )}
+        </div>
       )}
 
       {/* Error state */}

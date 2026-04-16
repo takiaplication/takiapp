@@ -208,19 +208,48 @@ async def _start_export_job(project_id: str) -> str:
         except Exception:
             thumb_path = None
 
+        # ── Google Drive upload ───────────────────────────────────────────
+        await progress_callback(0.97, "Uploaden naar Google Drive…")
+        drive_url = None
+        try:
+            from services.drive_uploader import upload_to_drive  # noqa: PLC0415
+            project_name = project_id[:8]
+            # Fetch the project name for a nicer filename
+            db_name = await get_db()
+            try:
+                name_row = await (await db_name.execute(
+                    "SELECT name FROM projects WHERE id=?", (project_id,)
+                )).fetchone()
+                if name_row and name_row["name"]:
+                    project_name = name_row["name"].replace("/", "-")[:60]
+            finally:
+                await db_name.close()
+
+            today = __import__("datetime").date.today().strftime("%Y-%m-%d")
+            filename = f"{today}_{project_name}.mp4"
+            drive_url = await upload_to_drive(output_path, filename)
+
+            if drive_url:
+                # Delete local MP4 to free up Railway volume space
+                output_path.unlink(missing_ok=True)
+                await progress_callback(0.99, f"Drive upload klaar → {drive_url}")
+        except Exception as drive_err:
+            # Drive upload failure must never block the export success
+            print(f"[drive] upload failed (non-fatal): {drive_err}")
+
         # Mark project as 'library' once export succeeds
         db_done = await get_db()
         try:
             await db_done.execute(
                 """UPDATE projects SET status='library', pipeline_step='Export klaar',
-                   thumbnail_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                (thumb_path, project_id),
+                   thumbnail_path=?, drive_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                (thumb_path, drive_url, project_id),
             )
             await db_done.commit()
         finally:
             await db_done.close()
 
-        return str(output_path)
+        return drive_url or str(output_path)
 
     async def do_export_with_error_capture(progress_callback):
         try:

@@ -12,3 +12,5 @@ deep-translator>=1.11.0
 langdetect>=1.0.9
 opencv-python-headless>=4.8.0
 openai>=1.0.0
+google-api-python-client>=2.100.0
+google-auth>=2.23.0

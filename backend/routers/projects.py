@@ -126,7 +126,7 @@ async def list_library():
     db = await get_db()
     try:
         cursor = await db.execute(
-            """SELECT id, name, created_at, thumbnail_path
+            """SELECT id, name, created_at, thumbnail_path, drive_url
                FROM projects
                WHERE status='library'
                ORDER BY created_at DESC""",
@@ -142,6 +142,7 @@ async def list_library():
             created_at=r["created_at"],
             thumbnail_url=_thumb_to_url(r["thumbnail_path"] if "thumbnail_path" in r.keys() else None),
             download_url=f"/api/projects/{r['id']}/export/download",
+            drive_url=r["drive_url"] if "drive_url" in r.keys() else None,
         )
         for r in rows
     ]
