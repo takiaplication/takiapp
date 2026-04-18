@@ -91,9 +91,15 @@ async def lifespan(app: FastAPI):
     await _recover_stuck_exports()
     await _recover_pipeline_queue()
 
-    # Start Telegram bot (no-op if TELEGRAM_BOT_TOKEN is not set)
-    from services.telegram_bot import start_bot  # noqa: PLC0415
-    telegram_task = await start_bot()
+    # Start Telegram bot (no-op if TELEGRAM_BOT_TOKEN is not set).
+    # Wrapped in try/except so any import or runtime error is non-fatal and
+    # can never prevent the FastAPI app from starting.
+    telegram_task = None
+    try:
+        from services.telegram_bot import start_bot  # noqa: PLC0415
+        telegram_task = await start_bot()
+    except Exception as _tg_err:
+        print(f"[telegram] failed to start (non-fatal): {_tg_err}")
 
     yield
 

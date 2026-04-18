@@ -7,14 +7,15 @@ ReelFactory pipeline and replies "✅ Toegevoegd aan queue".
 
 Requires env var:  TELEGRAM_BOT_TOKEN
 If the token is absent the bot is silently disabled — FastAPI starts normally.
+
+NOTE: httpx is imported lazily (inside functions) so that a missing package
+can never prevent the FastAPI app from starting.
 """
 
 import asyncio
 import os
 import re
 from typing import Optional
-
-import httpx
 
 # ── URL pattern ───────────────────────────────────────────────────────────────
 # Matches TikTok (tiktok.com, vm.tiktok.com, vt.tiktok.com) and
@@ -50,6 +51,8 @@ async def start_bot() -> Optional[asyncio.Task]:
 
 async def _poll_loop(token: str) -> None:
     """Long-poll the Telegram Bot API forever."""
+    import httpx  # noqa: PLC0415 — lazy import keeps module-level import-free
+
     base_url = f"https://api.telegram.org/bot{token}"
     offset = 0
 
@@ -70,7 +73,7 @@ async def _poll_loop(token: str) -> None:
             await asyncio.sleep(5)
 
 
-async def _get_updates(client: httpx.AsyncClient, base_url: str, offset: int) -> list:
+async def _get_updates(client, base_url: str, offset: int) -> list:
     """Call getUpdates with a 30-second long-poll timeout."""
     try:
         resp = await client.get(
@@ -85,15 +88,15 @@ async def _get_updates(client: httpx.AsyncClient, base_url: str, offset: int) ->
         data = resp.json()
         if data.get("ok"):
             return data.get("result", [])
-    except httpx.ReadTimeout:
-        pass  # normal — no messages in 30 s
     except Exception as exc:
-        print(f"[telegram] getUpdates error: {exc}")
-        await asyncio.sleep(2)
+        # ReadTimeout is normal (no messages in 30 s); other errors get logged.
+        if "ReadTimeout" not in type(exc).__name__:
+            print(f"[telegram] getUpdates error: {exc}")
+            await asyncio.sleep(2)
     return []
 
 
-async def _handle_update(client: httpx.AsyncClient, base_url: str, update: dict) -> None:
+async def _handle_update(client, base_url: str, update: dict) -> None:
     """Process a single Telegram update."""
     # Support both private/group messages and channel posts
     message = update.get("message") or update.get("channel_post")
@@ -130,12 +133,7 @@ async def _handle_update(client: httpx.AsyncClient, base_url: str, update: dict)
     await _send_message(client, base_url, chat_id, reply)
 
 
-async def _send_message(
-    client: httpx.AsyncClient,
-    base_url: str,
-    chat_id: int,
-    text: str,
-) -> None:
+async def _send_message(client, base_url: str, chat_id: int, text: str) -> None:
     """Send a text reply to a Telegram chat."""
     try:
         await client.post(
