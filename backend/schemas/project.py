@@ -34,3 +34,4 @@ class LibraryItem(BaseModel):
     download_url: str
     drive_url: Optional[str] = None
     views: int = 0
+    pipeline_error: Optional[str] = None

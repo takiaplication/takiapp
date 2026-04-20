@@ -272,6 +272,25 @@ function ProjectCard({
             </a>
           )}
 
+          {/* Drive upload failure — always show the error message so the user
+              knows why the file is missing from Drive */}
+          {!project.drive_url && project.pipeline_error && (
+            <div className="flex flex-col gap-1 bg-red-950/60 border border-red-800 rounded-lg px-2 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-red-300 text-xs font-semibold">⚠ Drive upload mislukt</span>
+              </div>
+              <p className="text-[11px] text-red-300/90 leading-snug font-mono break-words">
+                {project.pipeline_error}
+              </p>
+              <button
+                onClick={handleReexport}
+                className="mt-1 text-xs font-medium py-1 px-2 rounded bg-red-700 hover:bg-red-600 text-white transition-colors"
+              >
+                ↻ Drive upload opnieuw proberen
+              </button>
+            </div>
+          )}
+
           <button
             onClick={handleRegenerate}
             className="flex items-center justify-center gap-2 bg-blue-700/70 hover:bg-blue-600 text-white text-xs font-medium py-1.5 px-3 rounded-lg transition-colors border border-blue-600/50"

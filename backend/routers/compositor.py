@@ -2,6 +2,7 @@ import asyncio
 import random
 import shutil
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
@@ -271,9 +272,10 @@ async def _start_export_job(project_id: str) -> str:
 
         # ── Google Drive upload ───────────────────────────────────────────
         await progress_callback(0.97, "Uploaden naar Google Drive…")
-        drive_url = None
+        drive_url: Optional[str] = None
+        drive_error: Optional[str] = None
         try:
-            from services.drive_uploader import upload_to_drive  # noqa: PLC0415
+            from services.drive_uploader import upload_to_drive, DriveUploadError  # noqa: PLC0415
             project_name = project_id[:8]
             # Fetch the project name for a nicer filename
             db_name = await get_db()
@@ -288,7 +290,11 @@ async def _start_export_job(project_id: str) -> str:
 
             today = __import__("datetime").date.today().strftime("%Y-%m-%d")
             filename = f"{today}_{project_name}.mp4"
-            drive_url = await upload_to_drive(output_path, filename)
+            try:
+                drive_url = await upload_to_drive(output_path, filename)
+            except DriveUploadError as de:
+                drive_error = str(de)
+                print(f"[drive] upload FAILED: {drive_error}")
 
             if drive_url:
                 # Delete local MP4 to free up Railway volume space
@@ -301,17 +307,34 @@ async def _start_export_job(project_id: str) -> str:
                 if freed_bytes > 0:
                     print(f"[cleanup] {project_id}: freed {freed_bytes // (1024*1024)} MB")
                 await progress_callback(0.99, f"Drive upload klaar → {drive_url}")
+            elif drive_error:
+                # Keep the local MP4 as a fallback so the user can still
+                # download it while they sort out the Drive configuration.
+                await progress_callback(0.99, "Drive upload mislukt — MP4 bewaard")
         except Exception as drive_err:
-            # Drive upload failure must never block the export success
-            print(f"[drive] upload failed (non-fatal): {drive_err}")
+            # Defensive — should rarely trigger since DriveUploadError is
+            # already caught above. Keep the MP4 so the user isn't stuck.
+            drive_error = f"Unexpected Drive error: {drive_err}"
+            print(f"[drive] unexpected error (non-fatal): {drive_err}")
 
-        # Mark project as 'library' once export succeeds
+        # Mark project as 'library' once export succeeds.
+        # If Drive failed we still park the project in the Library column so
+        # the user can manage it, but we surface the error via pipeline_error.
         db_done = await get_db()
         try:
             await db_done.execute(
-                """UPDATE projects SET status='library', pipeline_step='Export klaar',
-                   thumbnail_path=?, drive_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                (thumb_path, drive_url, project_id),
+                """UPDATE projects SET status='library',
+                   pipeline_step=?, pipeline_error=?,
+                   thumbnail_path=?, drive_url=?,
+                   updated_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (
+                    "Export klaar" if not drive_error else "Drive upload mislukt",
+                    drive_error,
+                    thumb_path,
+                    drive_url,
+                    project_id,
+                ),
             )
             await db_done.commit()
         finally:

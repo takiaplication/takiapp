@@ -235,6 +235,7 @@ export interface LibraryItem {
   download_url: string
   drive_url: string | null
   views: number
+  pipeline_error: string | null
 }
 
 export async function getLibrary(): Promise<LibraryItem[]> {

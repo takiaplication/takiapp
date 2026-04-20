@@ -138,7 +138,7 @@ async def list_library():
     db = await get_db()
     try:
         cursor = await db.execute(
-            """SELECT id, name, created_at, thumbnail_path, drive_url, views
+            """SELECT id, name, created_at, thumbnail_path, drive_url, views, pipeline_error
                FROM projects
                WHERE status='library'
                ORDER BY created_at DESC""",
@@ -156,6 +156,7 @@ async def list_library():
             download_url=f"/api/projects/{r['id']}/export/download",
             drive_url=r["drive_url"] if "drive_url" in r.keys() else None,
             views=int(r["views"]) if "views" in r.keys() and r["views"] is not None else 0,
+            pipeline_error=r["pipeline_error"] if "pipeline_error" in r.keys() else None,
         )
         for r in rows
     ]

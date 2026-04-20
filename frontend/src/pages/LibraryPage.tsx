@@ -175,6 +175,16 @@ export default function LibraryPage() {
                   </div>
                 </div>
 
+                {/* Drive-upload failure banner — always visible when no Drive URL */}
+                {!item.drive_url && item.pipeline_error && (
+                  <div className="px-3 py-2 bg-red-950/60 border-t border-red-800">
+                    <p className="text-[11px] text-red-300 font-semibold mb-1">⚠ Drive upload mislukt</p>
+                    <p className="text-[10px] text-red-300/80 font-mono leading-snug break-words line-clamp-3">
+                      {item.pipeline_error}
+                    </p>
+                  </div>
+                )}
+
                 {/* Card footer */}
                 <div className="px-3 py-2.5 flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
