@@ -67,27 +67,99 @@ def cleanup_project_output(project_id: str) -> int:
 
 def sweep_all_intermediates(skip_project_id: Optional[str] = None) -> dict:
     """
-    Emergency volume-cleanup sweep: deletes heavy intermediates from every
-    project directory on disk. Skips the project currently being processed
-    (if any) so we don't yank files out from under a live export.
+    Emergency volume-cleanup sweep. Does three things:
 
-    Returns {'freed_bytes': int, 'projects': int} for UI feedback.
+      1. Deletes every project folder on disk whose ID is NOT in the `projects`
+         table any more (orphans left behind by partial deletes / crashes).
+      2. For each project still in the DB: wipes intermediates
+         (source.mp4, frames/, rendered/, memes/, transitions/).
+      3. For each project that already has drive_url set: wipes output.mp4
+         too (it's safely in Drive, no reason to keep the local copy).
+
+    The currently-processing project (passed via skip_project_id) is left
+    completely alone so a live export can't have files yanked out from under
+    it.
+
+    Returns diagnostic counts for the UI.
     """
+    import sqlite3
+    from config import DATABASE_PATH  # noqa: PLC0415
+
     if not PROJECTS_DIR.exists():
-        return {"freed_bytes": 0, "projects": 0}
+        return {
+            "freed_bytes": 0,
+            "projects_cleaned": 0,
+            "orphans_removed": 0,
+            "outputs_removed": 0,
+        }
+
+    # ── Read the DB synchronously — we're inside asyncio.to_thread ──────
+    known_ids: set[str] = set()
+    uploaded_ids: set[str] = set()
+    try:
+        conn = sqlite3.connect(str(DATABASE_PATH))
+        try:
+            cur = conn.execute("SELECT id, drive_url FROM projects")
+            for row in cur.fetchall():
+                pid = row[0]
+                known_ids.add(pid)
+                if row[1]:
+                    uploaded_ids.add(pid)
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[sweep] could not read DB ({exc}); falling back to 'keep all'")
+        # If we can't read the DB, be conservative — don't delete any folder.
+        known_ids = {d.name for d in PROJECTS_DIR.iterdir() if d.is_dir()}
 
     freed = 0
     touched = 0
+    orphans = 0
+    outputs = 0
+
     for d in PROJECTS_DIR.iterdir():
         if not d.is_dir():
             continue
         if skip_project_id and d.name == skip_project_id:
             continue
+
+        # ── (1) Orphan folder: nuke the whole thing ──────────────────────
+        if d.name not in known_ids:
+            try:
+                total = 0
+                for p in d.rglob("*"):
+                    if p.is_file():
+                        try:
+                            total += p.stat().st_size
+                        except OSError:
+                            pass
+                shutil.rmtree(d, ignore_errors=True)
+                freed += total
+                orphans += 1
+                print(f"[sweep] removed orphan folder {d.name} ({total // (1024*1024)} MB)")
+            except Exception as exc:
+                print(f"[sweep] failed to remove orphan {d.name}: {exc}")
+            continue
+
+        # ── (2) Known project: wipe intermediates ────────────────────────
         got = _wipe_targets(d, _POST_EXPORT_INTERMEDIATES)
         if got:
             touched += 1
             freed += got
-    return {"freed_bytes": freed, "projects": touched}
+
+        # ── (3) Already in Drive: wipe local output.mp4 too ──────────────
+        if d.name in uploaded_ids:
+            got_out = _wipe_targets(d, ["output.mp4"])
+            if got_out:
+                outputs += 1
+                freed += got_out
+
+    return {
+        "freed_bytes": freed,
+        "projects_cleaned": touched,
+        "orphans_removed": orphans,
+        "outputs_removed": outputs,
+    }
 from services.job_manager import job_manager
 from services.video_compositor import compose_video
 from services.dm_renderer import renderer
@@ -440,14 +512,21 @@ async def download_video(project_id: str):
 @router.post("/admin/cleanup-volume")
 async def admin_cleanup_volume():
     """
-    Emergency volume cleanup — deletes heavy intermediates (source.mp4,
-    frames/, rendered/, memes/, transitions/) from every project folder on
-    disk. output.mp4 and thumbnail.jpg are preserved so the Kanban UI keeps
-    working. Safe to hit even while projects are processing.
+    Emergency volume cleanup. Three-phase sweep:
+      1. Remove whole project folders whose ID is no longer in the DB
+         (orphans left behind by partial deletes / crashes).
+      2. Wipe heavy intermediates (source.mp4, frames/, rendered/, memes/,
+         transitions/) for every remaining project.
+      3. Wipe output.mp4 for every project with drive_url set (safely in
+         Drive already).
+    output.mp4 + thumbnail.jpg are preserved for projects without Drive.
+    Safe to hit even while projects are processing.
     """
     result = await asyncio.to_thread(sweep_all_intermediates, None)
     return {
         "ok": True,
         "freed_mb": result["freed_bytes"] // (1024 * 1024),
-        "projects_cleaned": result["projects"],
+        "projects_cleaned": result["projects_cleaned"],
+        "orphans_removed": result["orphans_removed"],
+        "outputs_removed": result["outputs_removed"],
     }

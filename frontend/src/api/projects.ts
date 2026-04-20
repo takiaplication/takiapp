@@ -279,7 +279,13 @@ export async function reexportProject(projectId: string): Promise<void> {
   await api.post(`/projects/${projectId}/reexport`)
 }
 
-export async function cleanupVolume(): Promise<{ ok: boolean; freed_mb: number; projects_cleaned: number }> {
+export async function cleanupVolume(): Promise<{
+  ok: boolean
+  freed_mb: number
+  projects_cleaned: number
+  orphans_removed: number
+  outputs_removed: number
+}> {
   const res = await api.post('/admin/cleanup-volume')
   return res.data
 }

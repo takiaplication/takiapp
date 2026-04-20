@@ -435,7 +435,12 @@ export default function KanbanDashboard() {
     setCleaning(true)
     try {
       const res = await cleanupVolume()
-      alert(`✅ ${res.freed_mb} MB vrijgemaakt over ${res.projects_cleaned} projecten.`)
+      alert(
+        `✅ ${res.freed_mb} MB vrijgemaakt\n` +
+        `• ${res.projects_cleaned} projecten opgeschoond\n` +
+        `• ${res.orphans_removed} orphan folders verwijderd\n` +
+        `• ${res.outputs_removed} oude MP4's weg (Drive-uploads)`,
+      )
       await refresh()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
