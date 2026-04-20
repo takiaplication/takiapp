@@ -161,9 +161,10 @@ async def assign_library_meme(
     try:
         await db.execute(
             """UPDATE slides
-               SET source_frame_path=?, hold_duration_ms=?, rendered_path=NULL, meme_category=?
+               SET source_frame_path=?, meme_source_path=?, hold_duration_ms=?,
+                   rendered_path=NULL, meme_category=?
                WHERE id=? AND project_id=?""",
-            (str(meme_path), hold_ms, body.category, slide_id, project_id),
+            (str(meme_path), str(meme_path), hold_ms, body.category, slide_id, project_id),
         )
         await db.commit()
     finally:

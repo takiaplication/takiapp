@@ -14,6 +14,36 @@ from routers import meme_library_router
 from routers import pipeline_router
 
 
+async def _cleanup_library_intermediates() -> None:
+    """
+    One-shot sweep on startup: free disk space by deleting the intermediate
+    files (source.mp4, frames/, rendered/) of every project that has already
+    been uploaded to Drive. These files are kept during editing but are not
+    needed once the MP4 is safely in Drive.
+    """
+    from database import get_db  # noqa: PLC0415
+    from routers.compositor import cleanup_project_intermediates  # noqa: PLC0415
+
+    db = await get_db()
+    try:
+        rows = await (await db.execute(
+            "SELECT id FROM projects WHERE status='library' AND drive_url IS NOT NULL"
+        )).fetchall()
+    finally:
+        await db.close()
+
+    total_freed = 0
+    for row in rows:
+        try:
+            total_freed += cleanup_project_intermediates(row["id"])
+        except Exception as exc:
+            print(f"[cleanup-sweep] {row['id']}: {exc}")
+
+    if total_freed > 0:
+        print(f"[cleanup-sweep] freed {total_freed // (1024*1024)} MB from "
+              f"{len(rows)} library projects")
+
+
 async def _recover_stuck_exports() -> None:
     """
     On startup: find any project stuck at status='approved' without a finished
@@ -88,6 +118,10 @@ async def lifespan(app: FastAPI):
     print(f"[startup] PROJECTS_DIR = {PROJECTS_DIR}")
     await init_db()
     await renderer.start()
+    # Reclaim disk space BEFORE doing anything else — this is critical on
+    # Railway where the volume fills up with old source.mp4 / frames / PNGs
+    # from projects already safely uploaded to Drive.
+    await _cleanup_library_intermediates()
     await _recover_stuck_exports()
     await _recover_pipeline_queue()
 

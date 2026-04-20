@@ -302,3 +302,91 @@ async def reexport_project(project_id: str):
     await _set_status(project_id, "approved", "Video exporteren… (herstart)", "")
     await _start_export_job(project_id)
     return {"ok": True}
+
+
+@router.post("/projects/{project_id}/regenerate")
+async def regenerate_project(project_id: str):
+    """
+    Rebuild the MP4 for a library project from its stored state.
+    No source video required — reuses slides, messages, meme picks, and
+    render settings straight from the database.
+
+    Steps:
+      1. Clear rendered_path on every slide so Playwright / meme renders fresh.
+      2. Regenerate each app_ad slide's source PNG (cleanup deleted them once
+         the project was safely uploaded to Drive).
+      3. Clear drive_url and pipeline_error so the new export gets a fresh
+         Drive link and a clean status line.
+      4. Flip status back to 'approved' and submit the export job.
+    """
+    from routers.compositor import _start_export_job  # noqa: PLC0415
+    from routers.import_router import rerender_appad_slide  # noqa: PLC0415
+
+    db = await get_db()
+    try:
+        proj = await (await db.execute(
+            "SELECT status FROM projects WHERE id=?", (project_id,)
+        )).fetchone()
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found")
+    finally:
+        await db.close()
+
+    # Only library projects are regenerable — everything else is still editable
+    # and has its own flow (approve, re-export, etc.).
+    if proj["status"] != "library":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only library projects can be regenerated (current status: {proj['status']})",
+        )
+
+    # ── Step 1: clear stale rendered paths so everything re-renders fresh ──
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE slides SET rendered_path=NULL WHERE project_id=?",
+            (project_id,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    # ── Step 2: regenerate every app_ad slide's source PNG ────────────────
+    db = await get_db()
+    try:
+        appad_slides = await (await db.execute(
+            """SELECT id FROM slides
+               WHERE project_id=? AND frame_type='app_ad' AND is_active=1
+               ORDER BY sort_order""",
+            (project_id,),
+        )).fetchall()
+    finally:
+        await db.close()
+
+    for s in appad_slides:
+        try:
+            await rerender_appad_slide(project_id, s["id"])
+        except ValueError as exc:
+            # A single bad app_ad should not block regeneration —
+            # the export will raise its own clear error if truly needed.
+            print(f"[regenerate] skipping app_ad {s['id']}: {exc}")
+
+    # ── Step 3: clear drive_url + error so the new export starts clean ────
+    db = await get_db()
+    try:
+        await db.execute(
+            """UPDATE projects
+               SET drive_url=NULL, pipeline_error=NULL,
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (project_id,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    # ── Step 4: flip to approved + start export ───────────────────────────
+    await _set_status(project_id, "approved", "Video regenereren…", "")
+    await _start_export_job(project_id)
+
+    return {"ok": True}

@@ -730,12 +730,13 @@ async def list_frames(project_id: str):
 
 # ── Re-render a single app_ad slide ───────────────────────────────────────────
 
-@router.post("/projects/{project_id}/slides/{slide_id}/rerender-appad")
-async def rerender_appad(project_id: str, slide_id: str):
+async def rerender_appad_slide(project_id: str, slide_id: str) -> str:
     """
     Re-render one app_ad slide using the current state of the surrounding DM slides.
-    Call this after editing the DM slide that feeds the app_ad screenshot / bubble text.
-    Returns {"frame_url": "/files/…"} with the freshly rendered PNG.
+    Returns the absolute path to the rendered PNG.
+
+    Raises ValueError if the slide is missing, not an app_ad, or if there is no
+    DM slide with text before it.
     """
     # ── Lazy imports (avoid circular deps) ─────────────────────────────────
     from services.dm_renderer import renderer as _renderer, _make_jitter   # noqa: PLC0415
@@ -757,11 +758,11 @@ async def rerender_appad(project_id: str, slide_id: str):
     # Find the slot index for this slide
     slot_idx = next((i for i, s in enumerate(all_slides) if s["id"] == slide_id), None)
     if slot_idx is None:
-        raise HTTPException(status_code=404, detail="Slide not found in this project")
+        raise ValueError("Slide not found in this project")
 
     slot = all_slides[slot_idx]
     if (slot["frame_type"] if "frame_type" in slot.keys() else "dm") != "app_ad":
-        raise HTTPException(status_code=400, detail="Slide is not an app_ad slide")
+        raise ValueError("Slide is not an app_ad slide")
 
     # ── Find the best DM screenshot (last DM before this slot with text) ──
     dm_before = [
@@ -786,7 +787,7 @@ async def rerender_appad(project_id: str, slide_id: str):
             break
 
     if not screenshot_src:
-        raise HTTPException(status_code=422, detail="No DM slide with text found before this app_ad")
+        raise ValueError("No DM slide with text found before this app_ad")
 
     # ── Render DM screenshot (always fresh — picks up latest message edits) ──
     conv = await _build_conv(project_id, screenshot_src["id"])
@@ -830,6 +831,27 @@ async def rerender_appad(project_id: str, slide_id: str):
         await db_save.commit()
     finally:
         await db_save.close()
+
+    return appad_out
+
+
+@router.post("/projects/{project_id}/slides/{slide_id}/rerender-appad")
+async def rerender_appad(project_id: str, slide_id: str):
+    """
+    Re-render one app_ad slide using the current state of the surrounding DM slides.
+    Call this after editing the DM slide that feeds the app_ad screenshot / bubble text.
+    Returns {"frame_url": "/files/…"} with the freshly rendered PNG.
+    """
+    try:
+        appad_out = await rerender_appad_slide(project_id, slide_id)
+    except ValueError as exc:
+        # Map domain errors to appropriate HTTP codes
+        msg = str(exc)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        if "not an app_ad" in msg.lower():
+            raise HTTPException(status_code=400, detail=msg)
+        raise HTTPException(status_code=422, detail=msg)
 
     frame_url = _to_url_path(appad_out)
     return {"frame_url": frame_url, "slide_id": slide_id}

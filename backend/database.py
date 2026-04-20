@@ -107,6 +107,8 @@ async def init_db():
             ("projects", "drive_url", "TEXT"),
             ("messages", "content_hash", "TEXT"),
             ("messages", "story_group_id", "TEXT"),
+            ("projects", "views", "INTEGER DEFAULT 0"),
+            ("slides", "meme_source_path", "TEXT"),
         ]
         for table, col, definition in migrations:
             try:

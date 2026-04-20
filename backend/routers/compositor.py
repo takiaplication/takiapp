@@ -1,11 +1,52 @@
 import asyncio
 import random
+import shutil
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from database import get_db
 from config import PROJECTS_DIR, MEME_LIBRARY_DIR
+
+
+def cleanup_project_intermediates(project_id: str) -> int:
+    """
+    Delete the big intermediate files that are no longer needed once a project
+    has been successfully uploaded to Drive:
+      - source.mp4 (downloaded video, 10–50 MB)
+      - frames/    (1 frame per 500 ms of video, ~30 MB)
+      - rendered/  (per-slide PNGs, ~25 MB)
+    Keeps: thumbnail.jpg (still shown in Library grid) + the project folder itself.
+    Returns the number of bytes freed.
+    """
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        return 0
+
+    freed = 0
+    targets = [
+        project_dir / "source.mp4",
+        project_dir / "frames",
+        project_dir / "rendered",
+        project_dir / "memes",       # per-slide uploaded meme images
+        project_dir / "transitions", # pre-rendered crossfade frames, if any
+    ]
+    for t in targets:
+        try:
+            if t.is_file():
+                freed += t.stat().st_size
+                t.unlink()
+            elif t.is_dir():
+                for p in t.rglob("*"):
+                    if p.is_file():
+                        try:
+                            freed += p.stat().st_size
+                        except OSError:
+                            pass
+                shutil.rmtree(t, ignore_errors=True)
+        except Exception as exc:
+            print(f"[cleanup] {project_id}: could not remove {t.name}: {exc}")
+    return freed
 from services.job_manager import job_manager
 from services.video_compositor import compose_video
 from services.dm_renderer import renderer
@@ -60,22 +101,42 @@ async def _start_export_job(project_id: str) -> str:
                 out_path = rendered_path
 
             elif frame_type == "meme":
-                # ── Meme slide: pick a random file from the library category ──
+                # ── Meme slide ────────────────────────────────────────────
+                # Prefer the file that was picked last time (stored in
+                # meme_source_path). This makes "Regenerate video" deterministic
+                # even after the local rendered PNG was cleaned up. If no prior
+                # choice exists, pick a random file from the category and
+                # remember it for next time.
                 cat     = r["meme_category"] if "meme_category" in r.keys() and r["meme_category"] else "cooking"
                 cat_dir = MEME_LIBRARY_DIR / cat
                 _video_exts = {".mp4", ".mov", ".avi", ".webm"}
                 _img_exts   = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
                 _all_exts   = _video_exts | _img_exts
-                candidates  = [
-                    f for f in cat_dir.iterdir()
-                    if f.is_file() and f.suffix.lower() in _all_exts
-                ] if cat_dir.exists() else []
-                if not candidates:
-                    raise ValueError(
-                        f"Meme library folder '{cat}' is empty or missing. "
-                        f"Add files to {cat_dir}"
-                    )
-                source = str(random.choice(candidates))
+
+                stored_source = r["meme_source_path"] if "meme_source_path" in r.keys() else None
+                if stored_source and Path(stored_source).exists():
+                    source = stored_source
+                else:
+                    candidates  = [
+                        f for f in cat_dir.iterdir()
+                        if f.is_file() and f.suffix.lower() in _all_exts
+                    ] if cat_dir.exists() else []
+                    if not candidates:
+                        raise ValueError(
+                            f"Meme library folder '{cat}' is empty or missing. "
+                            f"Add files to {cat_dir}"
+                        )
+                    source = str(random.choice(candidates))
+                    # Remember the pick so regenerate produces the same result.
+                    db_mm = await get_db()
+                    try:
+                        await db_mm.execute(
+                            "UPDATE slides SET meme_source_path=? WHERE id=?",
+                            (source, r["id"]),
+                        )
+                        await db_mm.commit()
+                    finally:
+                        await db_mm.close()
 
                 def _render_image_meme(src: str, dst: str) -> None:
                     """Scale to full 1080 px width; black bars top/bottom only."""
@@ -232,6 +293,13 @@ async def _start_export_job(project_id: str) -> str:
             if drive_url:
                 # Delete local MP4 to free up Railway volume space
                 output_path.unlink(missing_ok=True)
+                # Also delete intermediate files (source.mp4, frames, rendered)
+                # — the project is now safely in Drive and doesn't need them.
+                freed_bytes = await asyncio.to_thread(
+                    cleanup_project_intermediates, project_id
+                )
+                if freed_bytes > 0:
+                    print(f"[cleanup] {project_id}: freed {freed_bytes // (1024*1024)} MB")
                 await progress_callback(0.99, f"Drive upload klaar → {drive_url}")
         except Exception as drive_err:
             # Drive upload failure must never block the export success
@@ -255,11 +323,14 @@ async def _start_export_job(project_id: str) -> str:
         try:
             return await do_export(progress_callback)
         except Exception as exc:
-            # Write error back to project so the Kanban card shows it
+            # Keep status='approved' so the card stays in the Approved column —
+            # we never want to redo the full pipeline (download/OCR/etc.) just
+            # because the export step failed. The user can retry export from
+            # the card's "Opnieuw exporteren" button.
             err_db = await get_db()
             try:
                 await err_db.execute(
-                    """UPDATE projects SET status='error', pipeline_step='Export mislukt',
+                    """UPDATE projects SET status='approved', pipeline_step='Export mislukt',
                        pipeline_error=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                     (str(exc), project_id),
                 )

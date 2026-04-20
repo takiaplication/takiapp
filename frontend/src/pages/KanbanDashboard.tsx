@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listProjects, submitPipeline, retryProject, reexportProject, deleteProject } from '../api/projects'
+import {
+  listProjects,
+  submitPipeline,
+  retryProject,
+  reexportProject,
+  deleteProject,
+  regenerateProject,
+  updateProjectViews,
+} from '../api/projects'
 import { getExportDownloadUrl } from '../api/projects'
 import type { Project } from '../types/project'
 
@@ -99,6 +107,29 @@ function ProjectCard({
     onRefresh()
   }
 
+  async function handleRegenerate(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!confirm(`Video opnieuw genereren voor "${project.name}"?\n\nDe bestaande Drive-link wordt vervangen door een nieuwe.`)) return
+    try {
+      await regenerateProject(project.id)
+      onRefresh()
+    } catch {
+      alert('Regenereren mislukt.')
+    }
+  }
+
+  async function handleViewsBlur(e: React.FocusEvent<HTMLInputElement>) {
+    const raw = e.target.value
+    const parsed = Math.max(0, parseInt(raw || '0', 10) || 0)
+    if (parsed === project.views) return
+    try {
+      await updateProjectViews(project.id, parsed)
+      onRefresh()
+    } catch {
+      // silent — next poll will correct the display
+    }
+  }
+
   async function handleDelete(e: React.MouseEvent) {
     e.stopPropagation()
     if (!confirm(`Project "${project.name}" verwijderen?`)) return
@@ -174,20 +205,44 @@ function ProjectCard({
 
       {project.status === 'approved' && (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse flex-shrink-0" />
-            <span className="text-xs text-violet-300 truncate">
-              {project.pipeline_step || 'Video exporteren…'}
-            </span>
-          </div>
-          {/* Re-export button — shown when export may have been lost (no output yet) */}
-          <button
-            onClick={handleReexport}
-            className="w-full text-xs font-medium py-1.5 px-3 rounded-lg bg-violet-800/60
-                       hover:bg-violet-700 text-violet-200 transition-colors border border-violet-700/50"
-          >
-            🔄 Opnieuw exporteren
-          </button>
+          {project.pipeline_error ? (
+            // Export failed — show error + red retry button (stays in Approved column)
+            <>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
+                <span className="text-xs text-red-300 truncate">
+                  {project.pipeline_step || 'Export mislukt'}
+                </span>
+              </div>
+              <p className="text-xs text-red-400 font-mono line-clamp-2" title={project.pipeline_error}>
+                {project.pipeline_error}
+              </p>
+              <button
+                onClick={handleReexport}
+                className="w-full text-xs font-medium py-1.5 px-3 rounded-lg bg-red-700
+                           hover:bg-red-600 text-white transition-colors"
+              >
+                ↻ Export opnieuw proberen
+              </button>
+            </>
+          ) : (
+            // Export running normally — violet progress indicator + re-export fallback
+            <>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse flex-shrink-0" />
+                <span className="text-xs text-violet-300 truncate">
+                  {project.pipeline_step || 'Video exporteren…'}
+                </span>
+              </div>
+              <button
+                onClick={handleReexport}
+                className="w-full text-xs font-medium py-1.5 px-3 rounded-lg bg-violet-800/60
+                           hover:bg-violet-700 text-violet-200 transition-colors border border-violet-700/50"
+              >
+                🔄 Opnieuw exporteren
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -216,6 +271,29 @@ function ProjectCard({
               ↓ Download MP4
             </a>
           )}
+
+          <button
+            onClick={handleRegenerate}
+            className="flex items-center justify-center gap-2 bg-blue-700/70 hover:bg-blue-600 text-white text-xs font-medium py-1.5 px-3 rounded-lg transition-colors border border-blue-600/50"
+          >
+            🔁 Regenereer video
+          </button>
+
+          <label
+            className="flex items-center gap-2 text-xs text-zinc-400 mt-0.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span>👁 Views</span>
+            <input
+              type="number"
+              min={0}
+              defaultValue={project.views}
+              key={project.views /* reset when server value changes */}
+              onBlur={handleViewsBlur}
+              onClick={(e) => e.stopPropagation()}
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white px-2 py-1 text-right focus:outline-none focus:border-emerald-500"
+            />
+          </label>
         </div>
       )}
 

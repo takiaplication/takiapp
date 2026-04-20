@@ -234,11 +234,29 @@ export interface LibraryItem {
   thumbnail_url: string | null
   download_url: string
   drive_url: string | null
+  views: number
 }
 
 export async function getLibrary(): Promise<LibraryItem[]> {
   const res = await api.get('/library')
   return res.data
+}
+
+export async function updateProjectViews(projectId: string, views: number): Promise<Project> {
+  const res = await api.patch(`/projects/${projectId}`, { views })
+  return res.data
+}
+
+export async function regenerateProject(projectId: string): Promise<void> {
+  await api.post(`/projects/${projectId}/regenerate`)
+}
+
+export function getProjectJsonUrl(projectId: string): string {
+  return `${API_BASE}/api/projects/${projectId}/json`
+}
+
+export function getLibraryExportAllUrl(): string {
+  return `${API_BASE}/api/library/export-all`
 }
 
 // --- Auto-pipeline ---

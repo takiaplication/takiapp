@@ -9,6 +9,7 @@ class ProjectCreate(BaseModel):
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
+    views: Optional[int] = None
 
 
 class ProjectResponse(BaseModel):
@@ -20,6 +21,7 @@ class ProjectResponse(BaseModel):
     pipeline_error: Optional[str] = None
     thumbnail_path: Optional[str] = None
     drive_url: Optional[str] = None
+    views: int = 0
     created_at: str
     updated_at: str
 
@@ -31,3 +33,4 @@ class LibraryItem(BaseModel):
     thumbnail_url: Optional[str] = None
     download_url: str
     drive_url: Optional[str] = None
+    views: int = 0
