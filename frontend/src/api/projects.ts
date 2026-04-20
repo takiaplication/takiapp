@@ -279,6 +279,11 @@ export async function reexportProject(projectId: string): Promise<void> {
   await api.post(`/projects/${projectId}/reexport`)
 }
 
+export async function cleanupVolume(): Promise<{ ok: boolean; freed_mb: number; projects_cleaned: number }> {
+  const res = await api.post('/admin/cleanup-volume')
+  return res.data
+}
+
 // --- Global app settings ---
 // The OpenAI API key is now set via the OPENAI_API_KEY environment variable
 // on Railway. There is no longer a UI for entering it.

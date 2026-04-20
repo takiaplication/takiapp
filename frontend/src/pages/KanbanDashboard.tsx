@@ -8,6 +8,7 @@ import {
   deleteProject,
   regenerateProject,
   updateProjectViews,
+  cleanupVolume,
 } from '../api/projects'
 import { getExportDownloadUrl } from '../api/projects'
 import type { Project } from '../types/project'
@@ -427,6 +428,23 @@ export default function KanbanDashboard() {
     }
   }
 
+  const [cleaning, setCleaning] = useState(false)
+
+  async function handleCleanup() {
+    if (!confirm('Volume opschonen? Verwijdert source.mp4, frames/, rendered/, memes/ en transitions/ voor alle projecten. output.mp4 + thumbnail blijven behouden.')) return
+    setCleaning(true)
+    try {
+      const res = await cleanupVolume()
+      alert(`✅ ${res.freed_mb} MB vrijgemaakt over ${res.projects_cleaned} projecten.`)
+      await refresh()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      alert(`Opschonen mislukt: ${msg}`)
+    } finally {
+      setCleaning(false)
+    }
+  }
+
   // Build per-column project lists
   const columnProjects = COLUMNS.map((col) => ({
     ...col,
@@ -465,6 +483,16 @@ export default function KanbanDashboard() {
                        whitespace-nowrap"
           >
             {submitting ? 'Bezig…' : '+ Toevoegen aan wachtrij'}
+          </button>
+          <button
+            onClick={handleCleanup}
+            disabled={cleaning}
+            title="Verwijder alle intermediates (source.mp4, frames, rendered, memes, transitions) van de volume. Veilig tijdens processing."
+            className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed
+                       text-zinc-300 px-5 py-2 rounded-lg text-xs font-medium transition-colors
+                       whitespace-nowrap border border-zinc-700"
+          >
+            {cleaning ? 'Opschonen…' : '🧹 Volume opschonen'}
           </button>
           {hasActive && (
             <div className="flex items-center gap-1.5 text-xs text-amber-400 justify-center">

@@ -10,29 +10,11 @@ from database import get_db
 from config import PROJECTS_DIR, MEME_LIBRARY_DIR
 
 
-def cleanup_project_intermediates(project_id: str) -> int:
-    """
-    Delete the big intermediate files that are no longer needed once a project
-    has been successfully uploaded to Drive:
-      - source.mp4 (downloaded video, 10–50 MB)
-      - frames/    (1 frame per 500 ms of video, ~30 MB)
-      - rendered/  (per-slide PNGs, ~25 MB)
-    Keeps: thumbnail.jpg (still shown in Library grid) + the project folder itself.
-    Returns the number of bytes freed.
-    """
-    project_dir = PROJECTS_DIR / project_id
-    if not project_dir.exists():
-        return 0
-
+def _wipe_targets(project_dir: Path, names: list[str]) -> int:
+    """Remove the given files/folders under project_dir. Returns bytes freed."""
     freed = 0
-    targets = [
-        project_dir / "source.mp4",
-        project_dir / "frames",
-        project_dir / "rendered",
-        project_dir / "memes",       # per-slide uploaded meme images
-        project_dir / "transitions", # pre-rendered crossfade frames, if any
-    ]
-    for t in targets:
+    for name in names:
+        t = project_dir / name
         try:
             if t.is_file():
                 freed += t.stat().st_size
@@ -46,8 +28,66 @@ def cleanup_project_intermediates(project_id: str) -> int:
                             pass
                 shutil.rmtree(t, ignore_errors=True)
         except Exception as exc:
-            print(f"[cleanup] {project_id}: could not remove {t.name}: {exc}")
+            print(f"[cleanup] {project_dir.name}: could not remove {t.name}: {exc}")
     return freed
+
+
+# Heavy intermediates that are useless once the MP4 is built. These are wiped
+# right after export finishes — success OR failure — so disk usage stays flat
+# even when Drive uploads are broken.
+_POST_EXPORT_INTERMEDIATES = [
+    "source.mp4",   # downloaded video, 10–50 MB
+    "frames",       # one frame per 500 ms, ~30 MB
+    "rendered",     # per-slide PNGs, ~25 MB
+    "memes",        # per-slide uploaded meme images
+    "transitions",  # pre-rendered crossfade frames
+]
+
+
+def cleanup_project_intermediates(project_id: str) -> int:
+    """
+    Delete the heavy intermediates (source.mp4, frames/, rendered/, memes/,
+    transitions/) for a single project. Keeps output.mp4 + thumbnail.jpg.
+    Safe to call multiple times; no-op on missing files.
+    Returns the number of bytes freed.
+    """
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        return 0
+    return _wipe_targets(project_dir, _POST_EXPORT_INTERMEDIATES)
+
+
+def cleanup_project_output(project_id: str) -> int:
+    """Delete output.mp4 for a single project (only call after Drive succeeded)."""
+    project_dir = PROJECTS_DIR / project_id
+    if not project_dir.exists():
+        return 0
+    return _wipe_targets(project_dir, ["output.mp4"])
+
+
+def sweep_all_intermediates(skip_project_id: Optional[str] = None) -> dict:
+    """
+    Emergency volume-cleanup sweep: deletes heavy intermediates from every
+    project directory on disk. Skips the project currently being processed
+    (if any) so we don't yank files out from under a live export.
+
+    Returns {'freed_bytes': int, 'projects': int} for UI feedback.
+    """
+    if not PROJECTS_DIR.exists():
+        return {"freed_bytes": 0, "projects": 0}
+
+    freed = 0
+    touched = 0
+    for d in PROJECTS_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        if skip_project_id and d.name == skip_project_id:
+            continue
+        got = _wipe_targets(d, _POST_EXPORT_INTERMEDIATES)
+        if got:
+            touched += 1
+            freed += got
+    return {"freed_bytes": freed, "projects": touched}
 from services.job_manager import job_manager
 from services.video_compositor import compose_video
 from services.dm_renderer import renderer
@@ -270,6 +310,14 @@ async def _start_export_job(project_id: str) -> str:
         except Exception:
             thumb_path = None
 
+        # ── Free disk space NOW — intermediates are dead weight once the
+        #     output MP4 is on disk. We do this BEFORE Drive upload so even a
+        #     Drive failure can't leave 100+ MB of garbage behind. Only
+        #     output.mp4 + thumbnail.jpg survive this step.
+        freed_early = await asyncio.to_thread(cleanup_project_intermediates, project_id)
+        if freed_early:
+            print(f"[cleanup] {project_id}: freed {freed_early // (1024*1024)} MB post-export")
+
         # ── Google Drive upload ───────────────────────────────────────────
         await progress_callback(0.97, "Uploaden naar Google Drive…")
         drive_url: Optional[str] = None
@@ -297,15 +345,8 @@ async def _start_export_job(project_id: str) -> str:
                 print(f"[drive] upload FAILED: {drive_error}")
 
             if drive_url:
-                # Delete local MP4 to free up Railway volume space
-                output_path.unlink(missing_ok=True)
-                # Also delete intermediate files (source.mp4, frames, rendered)
-                # — the project is now safely in Drive and doesn't need them.
-                freed_bytes = await asyncio.to_thread(
-                    cleanup_project_intermediates, project_id
-                )
-                if freed_bytes > 0:
-                    print(f"[cleanup] {project_id}: freed {freed_bytes // (1024*1024)} MB")
+                # Drive has the MP4 — drop the local copy too.
+                await asyncio.to_thread(cleanup_project_output, project_id)
                 await progress_callback(0.99, f"Drive upload klaar → {drive_url}")
             elif drive_error:
                 # Keep the local MP4 as a fallback so the user can still
@@ -346,6 +387,17 @@ async def _start_export_job(project_id: str) -> str:
         try:
             return await do_export(progress_callback)
         except Exception as exc:
+            # Clean up partial intermediates so a failed export doesn't hoard
+            # disk space forever. This is the single most important line for
+            # keeping the Railway volume from filling up on repeated ENOSPC /
+            # OOM / Playwright failures.
+            try:
+                freed = await asyncio.to_thread(cleanup_project_intermediates, project_id)
+                if freed:
+                    print(f"[cleanup] {project_id}: freed {freed // (1024*1024)} MB after export failure")
+            except Exception as cleanup_err:
+                print(f"[cleanup] post-failure cleanup errored: {cleanup_err}")
+
             # Keep status='approved' so the card stays in the Approved column —
             # we never want to redo the full pipeline (download/OCR/etc.) just
             # because the export step failed. The user can retry export from
@@ -383,3 +435,19 @@ async def download_video(project_id: str):
         media_type="video/mp4",
         filename=f"reelfactory_{project_id[:8]}.mp4",
     )
+
+
+@router.post("/admin/cleanup-volume")
+async def admin_cleanup_volume():
+    """
+    Emergency volume cleanup — deletes heavy intermediates (source.mp4,
+    frames/, rendered/, memes/, transitions/) from every project folder on
+    disk. output.mp4 and thumbnail.jpg are preserved so the Kanban UI keeps
+    working. Safe to hit even while projects are processing.
+    """
+    result = await asyncio.to_thread(sweep_all_intermediates, None)
+    return {
+        "ok": True,
+        "freed_mb": result["freed_bytes"] // (1024 * 1024),
+        "projects_cleaned": result["projects"],
+    }
