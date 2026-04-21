@@ -1,32 +1,51 @@
 """
-Google Drive uploader.
+Google Drive uploader — supports both OAuth user credentials and service
+account credentials.
 
-Reads these environment variables:
-  GOOGLE_SERVICE_ACCOUNT_JSON  — full JSON string of the service account key
-  GOOGLE_DRIVE_FOLDER_ID       — ID of the parent folder in Drive
-                                 (works best with a Shared Drive folder)
-  GOOGLE_DRIVE_USER_EMAIL      — (optional) email to share each uploaded file
-                                 with, so you always see the file in your own
-                                 Drive UI even when the SA owns it
+================================================================
+RECOMMENDED: OAuth user credentials (works with free Gmail)
+================================================================
+Set these three Railway env vars:
 
-Uploads the MP4 into a daily sub-folder named YYYY-MM-DD (created on demand)
-and returns the shareable Drive URL.
+  GOOGLE_OAUTH_CLIENT_SECRET_JSON   JSON contents of the OAuth client
+                                    (Desktop app) downloaded from Google
+                                    Cloud Console → APIs & Services →
+                                    Credentials.
 
-IMPORTANT — service account quota gotcha
-----------------------------------------
-A Google service account has **0 GB of personal Drive storage**. If you point
-GOOGLE_DRIVE_FOLDER_ID at a folder inside a user's personal "My Drive", Google
-creates folder/file *metadata* successfully but rejects the actual upload bytes
-with `storageQuotaExceeded`. Result: an empty daily folder and no video.
+  GOOGLE_OAUTH_REFRESH_TOKEN        Long-lived refresh token obtained by
+                                    running
+                                    `scripts/generate_drive_refresh_token.py`
+                                    once on your laptop.
 
-Fix: either
-  1. Put GOOGLE_DRIVE_FOLDER_ID inside a **Shared Drive** (Team Drive) and add
-     the service account as a member with "Content manager" role — Shared
-     Drives have their own storage pool independent of the SA.
-  2. Or switch to OAuth with a user refresh token.
+  GOOGLE_DRIVE_FOLDER_ID            ID of the Drive folder where daily
+                                    sub-folders should be created. Can be
+                                    a regular "My Drive" folder now —
+                                    because uploads are done as YOU, not
+                                    a service account, so they count
+                                    against your own 15 GB quota.
 
-This module tries to detect the quota failure and raises DriveUploadError
-with a clear remediation hint so the failure is surfaced to the user.
+Why: a service account has 0 GB of personal Drive storage. When it tries
+to upload a file to a user's "My Drive" folder, Google creates the file
+metadata but rejects the bytes with 'storageQuotaExceeded' — an empty
+folder appears in your Drive and no video. OAuth sidesteps the problem
+by acting as the user instead.
+
+================================================================
+FALLBACK: Service account credentials (requires Shared Drive)
+================================================================
+If GOOGLE_OAUTH_* are not set, the uploader falls back to:
+
+  GOOGLE_SERVICE_ACCOUNT_JSON       JSON contents of a service account
+                                    key.
+
+This only works when GOOGLE_DRIVE_FOLDER_ID lives inside a **Shared
+Drive** (Team Drive) and the service account is a member with
+'Content manager' role. Shared Drives have their own storage pool
+independent of the service account, so the 0 GB quota isn't an issue.
+
+If neither OAuth nor service account credentials are configured the
+upload is silently skipped and None is returned so the rest of the
+export pipeline still works.
 """
 
 import asyncio
@@ -42,6 +61,10 @@ class DriveUploadError(RuntimeError):
     """Raised on a real Drive upload failure (not on 'Drive not configured')."""
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Public API
+# ───────────────────────────────────────────────────────────────────────────
+
 async def upload_to_drive(mp4_path: Path, filename: str) -> Optional[str]:
     """
     Async wrapper — runs the blocking Google API calls in a thread.
@@ -51,15 +74,19 @@ async def upload_to_drive(mp4_path: Path, filename: str) -> Optional[str]:
       - the shareable Drive URL on success
 
     Raises:
-      - DriveUploadError on any real failure (quota, permission, size mismatch,
-        network). The caller should catch this and surface the message to the
-        user rather than silently dropping it.
+      - DriveUploadError on any real failure.
     """
-    sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
     share_email = os.environ.get("GOOGLE_DRIVE_USER_EMAIL", "").strip() or None
 
-    if not sa_json or not folder_id:
+    oauth_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET_JSON", "").strip()
+    oauth_refresh = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip()
+    sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+
+    has_oauth = bool(oauth_secret and oauth_refresh)
+    has_sa = bool(sa_json)
+
+    if not folder_id or (not has_oauth and not has_sa):
         return None  # Drive not configured — skip silently
 
     if not mp4_path.exists():
@@ -67,7 +94,14 @@ async def upload_to_drive(mp4_path: Path, filename: str) -> Optional[str]:
 
     try:
         return await asyncio.to_thread(
-            _upload_sync, mp4_path, filename, sa_json, folder_id, share_email
+            _upload_sync,
+            mp4_path,
+            filename,
+            folder_id,
+            share_email,
+            oauth_secret if has_oauth else None,
+            oauth_refresh if has_oauth else None,
+            sa_json if has_sa else None,
         )
     except DriveUploadError:
         raise
@@ -76,35 +110,86 @@ async def upload_to_drive(mp4_path: Path, filename: str) -> Optional[str]:
         raise DriveUploadError(f"Drive upload failed: {exc}") from exc
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Credential helpers
+# ───────────────────────────────────────────────────────────────────────────
+
+def _build_oauth_credentials(client_secret_json: str, refresh_token: str):
+    """
+    Construct user OAuth credentials from the stored client secret JSON +
+    refresh token. Access tokens are refreshed automatically when stale.
+    """
+    from google.oauth2.credentials import Credentials  # type: ignore
+    from google.auth.transport.requests import Request  # type: ignore
+
+    info = json.loads(client_secret_json)
+    # Desktop-app client JSON nests under "installed"; web-app under "web".
+    body = info.get("installed") or info.get("web") or info
+    client_id = body["client_id"]
+    client_secret = body["client_secret"]
+    token_uri = body.get("token_uri", "https://oauth2.googleapis.com/token")
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri=token_uri,
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=["https://www.googleapis.com/auth/drive.file"],
+    )
+    # Force-refresh so subsequent calls don't race on it.
+    creds.refresh(Request())
+    return creds
+
+
+def _build_sa_credentials(sa_json: str):
+    from google.oauth2 import service_account  # type: ignore
+
+    info = json.loads(sa_json)
+    return service_account.Credentials.from_service_account_info(
+        info,
+        scopes=["https://www.googleapis.com/auth/drive"],
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Sync upload
+# ───────────────────────────────────────────────────────────────────────────
+
 def _upload_sync(
     mp4_path: Path,
     filename: str,
-    sa_json: str,
     parent_folder_id: str,
     share_email: Optional[str],
+    oauth_secret: Optional[str],
+    oauth_refresh: Optional[str],
+    sa_json: Optional[str],
 ) -> str:
-    """Blocking upload — runs inside asyncio.to_thread."""
-    from google.oauth2 import service_account          # type: ignore
     from googleapiclient.discovery import build        # type: ignore
     from googleapiclient.errors import HttpError       # type: ignore
     from googleapiclient.http import MediaFileUpload   # type: ignore
 
-    sa_info = json.loads(sa_json)
-    sa_email = sa_info.get("client_email", "<unknown>")
-    credentials = service_account.Credentials.from_service_account_info(
-        sa_info,
-        scopes=["https://www.googleapis.com/auth/drive"],
-    )
+    # Prefer OAuth (user credentials) over SA because it's the only way
+    # writes to a personal 'My Drive' folder actually store bytes.
+    if oauth_secret and oauth_refresh:
+        credentials = _build_oauth_credentials(oauth_secret, oauth_refresh)
+        auth_label = "oauth-user"
+    else:
+        credentials = _build_sa_credentials(sa_json or "")
+        auth_label = (
+            f"service-account ({json.loads(sa_json or '{}').get('client_email', '?')})"
+        )
+
     service = build("drive", "v3", credentials=credentials, cache_discovery=False)
 
     local_size = mp4_path.stat().st_size
     print(
         f"[drive] uploading '{filename}' "
         f"({local_size / (1024 * 1024):.1f} MB) "
-        f"SA={sa_email} → parent_folder_id={parent_folder_id}"
+        f"auth={auth_label} → parent_folder_id={parent_folder_id}"
     )
 
-    # ── Step 0: verify the parent folder is reachable and identify drive type
+    # ── Verify parent folder is reachable + writable ──────────────────────
     try:
         parent = service.files().get(
             fileId=parent_folder_id,
@@ -119,17 +204,16 @@ def _upload_sync(
         )
         if not can_add_children:
             raise DriveUploadError(
-                f"Service account {sa_email} cannot write to folder "
-                f"{parent.get('name')!r} ({parent_folder_id}). "
-                "Grant it 'Content manager' / 'Editor' access on the folder."
+                f"No write access to folder {parent.get('name')!r} "
+                f"({parent_folder_id}). Check credentials and folder sharing."
             )
     except HttpError as he:
         raise DriveUploadError(
             f"Cannot access GOOGLE_DRIVE_FOLDER_ID={parent_folder_id}. "
-            f"Did you share the folder with {sa_email}? Error: {he}"
+            f"Error: {he}"
         ) from he
 
-    # ── Step 1: find or create the daily folder (YYYY-MM-DD) ─────────────
+    # ── Find or create the daily folder ──────────────────────────────────
     today = date.today().strftime("%Y-%m-%d")
     safe_today = today.replace("'", "\\'")
     query = (
@@ -163,7 +247,7 @@ def _upload_sync(
         daily_folder_id = folder["id"]
         print(f"[drive] created daily folder {today} (id={daily_folder_id})")
 
-    # ── Step 2: resumable upload, chunked, with progress logging ─────────
+    # ── Resumable upload ─────────────────────────────────────────────────
     media = MediaFileUpload(
         str(mp4_path),
         mimetype="video/mp4",
@@ -189,16 +273,18 @@ def _upload_sync(
             body = he.content.decode("utf-8", errors="replace")
         except Exception:
             pass
-        # Detect the SA-on-personal-Drive quota failure and give a real fix.
         if "storageQuotaExceeded" in body or "storage quota" in body.lower():
+            if auth_label.startswith("service-account"):
+                raise DriveUploadError(
+                    "storageQuotaExceeded — the service account has 0 GB of "
+                    "personal Drive storage. Set GOOGLE_OAUTH_CLIENT_SECRET_JSON "
+                    "+ GOOGLE_OAUTH_REFRESH_TOKEN to upload as a real user, or "
+                    "move GOOGLE_DRIVE_FOLDER_ID into a Shared Drive with the "
+                    "service account as Content manager."
+                ) from he
             raise DriveUploadError(
-                "Google Drive refused the upload with 'storageQuotaExceeded'. "
-                "A service account has 0 GB of personal Drive storage, so it "
-                "cannot write file bytes into a folder that lives in a user's "
-                "'My Drive'. Fix: move GOOGLE_DRIVE_FOLDER_ID to a Shared "
-                f"Drive (Team Drive) and add {sa_email} as 'Content manager'. "
-                "Folder creation works because metadata is free; file upload "
-                "needs actual storage."
+                "storageQuotaExceeded — your own Drive is full. Free up space "
+                "in https://drive.google.com or buy more Google One storage."
             ) from he
         raise DriveUploadError(
             f"Drive upload HTTP error: {he.status_code} {he.reason}. "
@@ -212,11 +298,7 @@ def _upload_sync(
         f"size={reported_size} parents={response.get('parents')}"
     )
 
-    # ── Step 3: verify the file actually has bytes in it ─────────────────
-    # Some failure modes leave a metadata-only file behind with size=0.
     if reported_size == 0:
-        # Double-check via a fresh get() before we raise, in case the create
-        # response just didn't include the size field populated yet.
         try:
             check = service.files().get(
                 fileId=file_id,
@@ -229,20 +311,17 @@ def _upload_sync(
 
     if reported_size == 0:
         raise DriveUploadError(
-            f"Drive reports 0 bytes for uploaded file {file_id}. "
-            "This usually means the service account's storage quota was "
-            "exhausted and Drive stored only the metadata, not the content. "
-            "Use a Shared Drive — see the comment at the top of "
-            "drive_uploader.py for the full fix."
+            f"Drive reports 0 bytes for uploaded file {file_id}. Likely a "
+            "silent quota failure."
         )
 
     if reported_size != local_size:
         print(
             f"[drive] WARNING size mismatch — local={local_size} "
-            f"drive={reported_size} (usually fine, Drive may round)"
+            f"drive={reported_size}"
         )
 
-    # ── Step 4: optional 'anyone-with-link reader' permission ────────────
+    # ── Optional: anyone-with-link reader ────────────────────────────────
     try:
         service.permissions().create(
             fileId=file_id,
@@ -252,7 +331,7 @@ def _upload_sync(
     except Exception as perm_err:
         print(f"[drive] anyone-with-link permission failed (non-fatal): {perm_err}")
 
-    # ── Step 5: optional explicit share with the human user ──────────────
+    # ── Optional: explicit share with the human user ─────────────────────
     if share_email:
         try:
             service.permissions().create(
@@ -263,6 +342,6 @@ def _upload_sync(
             ).execute()
             print(f"[drive] shared file with {share_email}")
         except Exception as share_err:
-            print(f"[drive] explicit share with {share_email} failed (non-fatal): {share_err}")
+            print(f"[drive] explicit share failed (non-fatal): {share_err}")
 
     return response.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view"

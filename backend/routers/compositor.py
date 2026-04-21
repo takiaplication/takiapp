@@ -9,6 +9,15 @@ from fastapi.responses import FileResponse
 from database import get_db
 from config import PROJECTS_DIR, MEME_LIBRARY_DIR
 
+# ── Global export serialization ────────────────────────────────────────────
+# Only ONE export may actually run at a time. Rendering every slide through
+# Playwright + ffmpeg is CPU/RAM-heavy enough that running two in parallel
+# risks OOM kills and disk exhaustion (each export writes ~100-200 MB of
+# intermediates). Approve-clicks on multiple projects enqueue behind this
+# lock; the UI shows "Wachten op andere export…" for the ones that are
+# waiting.
+_EXPORT_LOCK = asyncio.Lock()
+
 
 def _wipe_targets(project_dir: Path, names: list[str]) -> int:
     """Remove the given files/folders under project_dir. Returns bytes freed."""
@@ -456,8 +465,27 @@ async def _start_export_job(project_id: str) -> str:
         return drive_url or str(output_path)
 
     async def do_export_with_error_capture(progress_callback):
+        # If another export is already running, mark this one as waiting
+        # in the UI. The `async with _EXPORT_LOCK` below is what actually
+        # serializes — the status update is just so the user knows why
+        # nothing is happening yet.
+        if _EXPORT_LOCK.locked():
+            wait_db = await get_db()
+            try:
+                await wait_db.execute(
+                    """UPDATE projects SET pipeline_step=?, pipeline_error=NULL,
+                       updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                    ("Wachten op andere export…", project_id),
+                )
+                await wait_db.commit()
+            finally:
+                await wait_db.close()
+            await progress_callback(0.0, "Wachten op andere export…")
+
         try:
-            return await do_export(progress_callback)
+            async with _EXPORT_LOCK:
+                await progress_callback(0.0, "Export start…")
+                return await do_export(progress_callback)
         except Exception as exc:
             # Clean up partial intermediates so a failed export doesn't hoard
             # disk space forever. This is the single most important line for
