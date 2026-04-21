@@ -27,6 +27,12 @@ storage/
 .env
 .env.*
 
+# Google OAuth / service-account credentials (NEVER commit these)
+client_secret*.json
+service_account*.json
+backend/scripts/client_secret.json
+backend/scripts/token.json
+
 # OS
 .DS_Store
 Thumbs.db
