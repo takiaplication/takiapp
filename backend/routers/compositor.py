@@ -540,11 +540,21 @@ async def download_video(project_id: str):
 @router.get("/admin/drive-auth-check")
 async def admin_drive_auth_check():
     """Diagnostic: shows exactly which Drive auth method Railway has configured."""
-    import os
-    folder_id     = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
-    oauth_secret  = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET_JSON", "").strip()
-    oauth_refresh = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip()
-    sa_json       = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    import os, json as _json
+
+    # Read raw values — no strip yet so we can see whitespace/newlines
+    oauth_refresh_raw = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN")
+    oauth_secret_raw  = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET_JSON")
+    folder_id_raw     = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+    sa_json_raw       = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+
+    # All env var keys that contain GOOGLE or OAUTH — to catch typos
+    google_keys = sorted(k for k in os.environ if "GOOGLE" in k or "OAUTH" in k)
+
+    oauth_refresh = (oauth_refresh_raw or "").strip()
+    oauth_secret  = (oauth_secret_raw or "").strip()
+    sa_json       = (sa_json_raw or "").strip()
+    folder_id     = (folder_id_raw or "").strip()
 
     has_oauth = bool(oauth_secret and oauth_refresh)
     has_sa    = bool(sa_json)
@@ -552,23 +562,27 @@ async def admin_drive_auth_check():
     sa_email = None
     if sa_json:
         try:
-            import json as _json
             sa_email = _json.loads(sa_json).get("client_email")
         except Exception:
             sa_email = "invalid JSON"
 
-    oauth_secret_len  = len(oauth_secret)
-    oauth_refresh_len = len(oauth_refresh)
-    oauth_refresh_prefix = oauth_refresh[:6] if oauth_refresh else ""
-
     return {
-        "folder_id_set":         bool(folder_id),
-        "folder_id_prefix":      folder_id[:20] if folder_id else None,
         "will_use":              "oauth" if has_oauth else ("service_account" if has_sa else "nothing"),
-        "oauth_secret_length":   oauth_secret_len,
-        "oauth_refresh_length":  oauth_refresh_len,
-        "oauth_refresh_prefix":  oauth_refresh_prefix,   # first 6 chars — safe to show
+        "folder_id_set":         bool(folder_id),
+
+        # OAuth
+        "oauth_refresh_exists":  oauth_refresh_raw is not None,   # is the var set at all?
+        "oauth_refresh_raw_len": len(oauth_refresh_raw) if oauth_refresh_raw is not None else None,
+        "oauth_refresh_stripped_len": len(oauth_refresh),
+        "oauth_refresh_prefix":  oauth_refresh[:8] if oauth_refresh else "",
+        "oauth_secret_exists":   oauth_secret_raw is not None,
+        "oauth_secret_length":   len(oauth_secret),
+
+        # Service account
         "service_account_email": sa_email,
+
+        # All matching env var names — catches typos in variable names
+        "google_oauth_env_keys": google_keys,
     }
 
 
