@@ -537,6 +537,41 @@ async def download_video(project_id: str):
     )
 
 
+@router.get("/admin/drive-auth-check")
+async def admin_drive_auth_check():
+    """Diagnostic: shows exactly which Drive auth method Railway has configured."""
+    import os
+    folder_id     = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    oauth_secret  = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET_JSON", "").strip()
+    oauth_refresh = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip()
+    sa_json       = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+
+    has_oauth = bool(oauth_secret and oauth_refresh)
+    has_sa    = bool(sa_json)
+
+    sa_email = None
+    if sa_json:
+        try:
+            import json as _json
+            sa_email = _json.loads(sa_json).get("client_email")
+        except Exception:
+            sa_email = "invalid JSON"
+
+    oauth_secret_len  = len(oauth_secret)
+    oauth_refresh_len = len(oauth_refresh)
+    oauth_refresh_prefix = oauth_refresh[:6] if oauth_refresh else ""
+
+    return {
+        "folder_id_set":         bool(folder_id),
+        "folder_id_prefix":      folder_id[:20] if folder_id else None,
+        "will_use":              "oauth" if has_oauth else ("service_account" if has_sa else "nothing"),
+        "oauth_secret_length":   oauth_secret_len,
+        "oauth_refresh_length":  oauth_refresh_len,
+        "oauth_refresh_prefix":  oauth_refresh_prefix,   # first 6 chars — safe to show
+        "service_account_email": sa_email,
+    }
+
+
 @router.post("/admin/cleanup-volume")
 async def admin_cleanup_volume():
     """
