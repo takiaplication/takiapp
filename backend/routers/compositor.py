@@ -566,22 +566,37 @@ async def admin_drive_auth_check():
         except Exception:
             sa_email = "invalid JSON"
 
+    # Try to resolve which Gmail account the OAuth token belongs to
+    oauth_user_email = None
+    if oauth_secret and oauth_refresh:
+        try:
+            from services.drive_uploader import _build_oauth_credentials  # noqa
+            from googleapiclient.discovery import build  # noqa
+            creds = await asyncio.to_thread(_build_oauth_credentials, oauth_secret, oauth_refresh)
+            svc = build("oauth2", "v2", credentials=creds, cache_discovery=False)
+            info = await asyncio.to_thread(lambda: svc.userinfo().get().execute())
+            oauth_user_email = info.get("email")
+        except Exception as e:
+            oauth_user_email = f"error: {e}"
+
     return {
         "will_use":              "oauth" if has_oauth else ("service_account" if has_sa else "nothing"),
         "folder_id_set":         bool(folder_id),
+        "folder_id_prefix":      folder_id[:20] if folder_id else None,
 
         # OAuth
-        "oauth_refresh_exists":  oauth_refresh_raw is not None,   # is the var set at all?
+        "oauth_refresh_exists":  oauth_refresh_raw is not None,
         "oauth_refresh_raw_len": len(oauth_refresh_raw) if oauth_refresh_raw is not None else None,
         "oauth_refresh_stripped_len": len(oauth_refresh),
         "oauth_refresh_prefix":  oauth_refresh[:8] if oauth_refresh else "",
         "oauth_secret_exists":   oauth_secret_raw is not None,
         "oauth_secret_length":   len(oauth_secret),
+        "oauth_user_email":      oauth_user_email,   # ← which Gmail is logged in?
 
         # Service account
         "service_account_email": sa_email,
 
-        # All matching env var names — catches typos in variable names
+        # All matching env var names
         "google_oauth_env_keys": google_keys,
     }
 
