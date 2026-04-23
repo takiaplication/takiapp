@@ -40,7 +40,12 @@ except ImportError:
         "Run:   pip install google-auth-oauthlib google-auth"
     )
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+# 'drive' (full scope) instead of 'drive.file' — drive.file can only see
+# files THIS app created, so it can't access the pre-existing 'content'
+# folder that GOOGLE_DRIVE_FOLDER_ID points at. Must match the scope used
+# by backend/services/drive_uploader.py, otherwise the refresh token
+# won't be usable there.
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 HERE = Path(__file__).resolve().parent
 CLIENT_SECRET_PATH = HERE / "client_secret.json"

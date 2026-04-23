@@ -135,7 +135,11 @@ def _build_oauth_credentials(client_secret_json: str, refresh_token: str):
         token_uri=token_uri,
         client_id=client_id,
         client_secret=client_secret,
-        scopes=["https://www.googleapis.com/auth/drive.file"],
+        # 'drive' (full scope) instead of 'drive.file' — needed because
+        # GOOGLE_DRIVE_FOLDER_ID typically points at a folder the user
+        # created manually (or via the service account), NOT one this
+        # app created. drive.file can only see app-created files.
+        scopes=["https://www.googleapis.com/auth/drive"],
     )
     # Force-refresh so subsequent calls don't race on it.
     creds.refresh(Request())
