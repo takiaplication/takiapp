@@ -46,30 +46,43 @@ async def _cleanup_library_intermediates() -> None:
 
 async def _recover_stuck_exports() -> None:
     """
-    On startup: find any project stuck at status='approved' without a finished
-    output.mp4 and restart the export job so it completes automatically.
+    On startup: find any project stuck at status='approved' without a Drive URL
+    and re-queue the export job so it completes automatically.
+
+    The previous filter only checked for missing output.mp4, which missed the
+    common case where an export crashed mid-flight while showing
+    'Wachten op andere export…' — those cards stayed forever stuck because
+    nothing in-process re-submits them after a Railway redeploy.
+
+    Re-queueing approved projects without a drive_url covers BOTH:
+      - Projects that never finished a local export (no output.mp4)
+      - Projects that finished locally but failed during Drive upload
+    The fresh _EXPORT_LOCK in the new process serialises them correctly, and
+    render-all is idempotent so already-rendered slides are skipped.
     """
     from database import get_db  # noqa: PLC0415
-    from config import PROJECTS_DIR  # noqa: PLC0415
-    from pathlib import Path  # noqa: PLC0415
     from routers.compositor import _start_export_job  # noqa: PLC0415
 
     db = await get_db()
     try:
         rows = await (await db.execute(
-            "SELECT id FROM projects WHERE status='approved'"
+            """SELECT id FROM projects
+               WHERE status='approved'
+               AND (drive_url IS NULL OR drive_url='')
+               ORDER BY created_at ASC"""
         )).fetchall()
     finally:
         await db.close()
 
     for row in rows:
         pid = row["id"]
-        output = PROJECTS_DIR / pid / "output.mp4"
-        if not output.exists():
-            try:
-                await _start_export_job(pid)
-            except Exception:
-                pass  # will surface as error in the job
+        try:
+            await _start_export_job(pid)
+        except Exception as exc:
+            print(f"[recover-export] {pid}: {exc}")
+
+    if rows:
+        print(f"[recover-export] re-queued {len(rows)} stuck export(s)")
 
 
 async def _recover_pipeline_queue() -> None:
