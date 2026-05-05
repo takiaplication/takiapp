@@ -6,7 +6,85 @@ The API key is read from the OPENAI_API_KEY environment variable.
 
 import asyncio
 import os
+import re
 from typing import Optional
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Post-processing rules — applied AFTER GPT output, in order.
+# Belt-and-braces: GPT is instructed to follow these rules in the prompt,
+# but regex enforcement guarantees they hold even when the model slips.
+# ───────────────────────────────────────────────────────────────────────────
+
+# Forbidden vocative slang words. They must never appear in the output.
+# We replace them with empty string and clean up resulting double spaces /
+# stray punctuation. \b ensures we don't touch words that contain "bro" or
+# "man" as a substring (e.g. "Bromine", "manier", "gewoon", "human").
+_FORBIDDEN_WORDS = re.compile(
+    r"\b(bro|broer|brooo+|man|manno*|mano|mannnn+|mannn+|broer|brrr+o+)\b",
+    flags=re.IGNORECASE,
+)
+
+# Compliment phrases that all collapse to the canonical "je bent smooth".
+# Order matters: longer/more specific patterns first so they win over short
+# ones. \b on both sides keeps it word-bounded.
+_COMPLIMENT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bamai\s+je\s+bent\s+(echt\s+)?goed\b", re.IGNORECASE),  "je bent smooth"),
+    (re.compile(r"\bdat\s+doe\s+je\s+(echt\s+)?goed\b",   re.IGNORECASE),  "je bent smooth"),
+    (re.compile(r"\bje\s+doet\s+dat\s+(echt\s+)?goed\b",  re.IGNORECASE),  "je bent smooth"),
+    (re.compile(r"\bkei\s+goed\b",                        re.IGNORECASE),  "je bent smooth"),
+    (re.compile(r"\bzwaar\s+goed\b",                      re.IGNORECASE),  "je bent smooth"),
+    (re.compile(r"\bje\s+bent\s+(echt\s+)?goed\b",        re.IGNORECASE),  "je bent smooth"),
+    (re.compile(r"\bsmooth\b",                            re.IGNORECASE),  "je bent smooth"),
+]
+
+
+def _clean_post_translation(text: str) -> str:
+    """
+    Post-process GPT output:
+      1. Collapse compliment phrases to canonical 'je bent smooth'.
+      2. Strip forbidden vocatives ('bro', 'man', and friends).
+      3. Tidy whitespace and stray punctuation left after removals.
+    Idempotent — running it twice yields the same result.
+    """
+    if not text:
+        return text
+
+    # 1. Compliments → 'je bent smooth' (do this BEFORE forbidden-word strip,
+    #    otherwise "je bent smooth" survives but a previous "je bent goed bro"
+    #    would lose 'bro' and become "je bent goed" — which we then wouldn't
+    #    rewrite to smooth. Order: rewrite first, then strip.)
+    out = text
+    for pattern, replacement in _COMPLIMENT_PATTERNS:
+        out = pattern.sub(replacement, out)
+
+    # Some patterns can chain. Examples:
+    #   - 'je bent goed' → 'je bent smooth', then the 'smooth' pattern fires
+    #     again on the new 'smooth' and prepends another 'je bent ' →
+    #     'je bent je bent smooth'.
+    #   - 'zwaar goed' → 'je bent smooth' inside 'je bent zwaar goed' →
+    #     'je bent je bent smooth'.
+    # Collapse any run of one-or-more 'je bent' prefixes back to a single one.
+    out = re.sub(r"(?:\bje\s+bent\s+){2,}smooth\b", "je bent smooth", out, flags=re.IGNORECASE)
+
+    # Same for adjacent duplicates separated by punctuation/whitespace, e.g.
+    # 'kei goed, smooth' → 'je bent smooth, je bent smooth' → 'je bent smooth'.
+    out = re.sub(
+        r"\bje\s+bent\s+smooth(?:[\s,;.!?-]+je\s+bent\s+smooth)+\b",
+        "je bent smooth",
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    # 2. Strip forbidden vocatives.
+    out = _FORBIDDEN_WORDS.sub("", out)
+
+    # 3. Tidy: collapse whitespace, fix stray punctuation like ", ," or " ,".
+    out = re.sub(r"\s+,", ",", out)
+    out = re.sub(r",\s*,+", ",", out)
+    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"\s+([!?.,;:])", r"\1", out)
+    return out.strip(" ,")
 
 
 async def _get_api_key() -> str:
@@ -52,12 +130,23 @@ async def translate_text(
                         "\n\n"
                         "BELANGRIJKSTE REGEL: Match de toon EXACT. "
                         "Als de brontekst straattaal, jeugdslang of rauwe taal bevat "
-                        "(zoals 'goonen', 'raggen', 'bro', 'ngl', 'lowkey', 'slay', 'vro', 'mano', "
+                        "(zoals 'goonen', 'raggen', 'ngl', 'lowkey', 'slay', 'vro', "
                         "'ewa', 'wallah', 'joh', 'haha', 'lmao', 'wtf', schuttingtaal), "
                         "dan gebruik je in de vertaling het EQUIVALENT in Nederlandse straattaal. "
-                        "Denk aan: 'ff', 'gwn', 'bro', 'sws', 'ngl', 'ewa', 'mano', 'vro', "
+                        "Denk aan: 'ff', 'gwn', 'sws', 'ngl', 'ewa', 'vro', "
                         "'joh', 'mn', 'kl', 'lekker puh', 'da's zwaar', 'boeie', 'hoezo', "
                         "'fk dat', 'chill', 'klinkt goed', 'da's fire', 'respecteer'. "
+                        "\n\n"
+                        "VERBODEN WOORDEN — gebruik deze NOOIT in de vertaling: "
+                        "'bro', 'man', 'mano', 'broer' als aanspreekvorm. "
+                        "Zelfs als ze in de brontekst staan, vertaal je ze naar iets anders "
+                        "of laat je ze gewoon weg. "
+                        "\n\n"
+                        "COMPLIMENT-REGEL: alle vormen van 'dat doe je goed', "
+                        "'amai je bent goed', 'kei goed', 'je bent goed', 'smooth', "
+                        "'je bent zwaar goed' worden ALTIJD vertaald als de exacte zin "
+                        "'je bent smooth' (geen variaties). "
+                        "\n\n"
                         "Maak de taal NOOIT netter of formeler dan het origineel. "
                         "Laat schuttingtaal staan als schuttingtaal. "
                         "Bewaar alle emojis exact. "
@@ -71,7 +160,8 @@ async def translate_text(
         )
         return response.choices[0].message.content.strip()
 
-    return await asyncio.to_thread(_call)
+    raw = await asyncio.to_thread(_call)
+    return _clean_post_translation(raw)
 
 
 async def batch_translate_conversation(
@@ -127,10 +217,20 @@ async def batch_translate_conversation(
                         f"Je krijgt een volledig Instagram DM-gesprek. "
                         f"Vertaal elk bericht naar CONSISTENT {lang_name} straatjeugdtaal. "
                         "Gebruik EXACT dezelfde slang-keuze door het hele gesprek: "
-                        "als 'bro' één keer 'bro' is, dan altijd 'bro'. "
-                        "Als 'gooning' 'raggen' is, dan overal 'raggen'. "
+                        "als 'gooning' 'raggen' is, dan overal 'raggen'. "
                         "Match de rauwe toon EXACT — maak het NOOIT netter dan het origineel. "
                         "Schuttingtaal blijft schuttingtaal. Bewaar alle emojis. "
+                        "\n\n"
+                        "VERBODEN WOORDEN — gebruik deze NOOIT in de vertaling: "
+                        "'bro', 'man', 'mano', 'broer' als aanspreekvorm. "
+                        "Zelfs als ze in de brontekst staan, vertaal je ze naar iets anders "
+                        "of laat je ze gewoon weg. "
+                        "\n\n"
+                        "COMPLIMENT-REGEL: alle vormen van 'dat doe je goed', "
+                        "'amai je bent goed', 'kei goed', 'je bent goed', 'smooth', "
+                        "'je bent zwaar goed' worden ALTIJD vertaald als de exacte zin "
+                        "'je bent smooth' (geen variaties). "
+                        "\n\n"
                         "Geef ALLEEN een JSON-array terug met dezelfde slide- en index-waarden:\n"
                         '[{"slide": 1, "index": 0, "text": "..."}, ...]'
                     ),
@@ -149,8 +249,13 @@ async def batch_translate_conversation(
             if raw.startswith("json"):
                 raw = raw[4:]
         results = _json.loads(raw.strip())
-        # Key by (slide, index) for O(1) lookup
-        result_map = {(item["slide"], item["index"]): item["text"] for item in results}
+        # Key by (slide, index) for O(1) lookup. Apply the post-processing
+        # safety net so any 'bro'/'man'/non-canonical compliment that GPT
+        # slipped through is normalised before it reaches the renderer.
+        result_map = {
+            (item["slide"], item["index"]): _clean_post_translation(item["text"])
+            for item in results
+        }
         out = []
         for m in messages:
             key = (m["slide"], m["index"])
