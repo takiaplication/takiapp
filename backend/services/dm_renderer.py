@@ -93,12 +93,19 @@ class DMRenderer:
 
     async def start(self):
         self._playwright = await async_playwright().start()
+        # On Railway the system chromium lives at /usr/bin/chromium (or the
+        # env var override). Locally (macOS dev) that path doesn't exist —
+        # fall back to Playwright's own managed Chromium by not passing
+        # executable_path at all.
         chromium_path = os.environ.get(
             "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "/usr/bin/chromium"
         )
+        launch_kwargs = {}
+        if Path(chromium_path).exists():
+            launch_kwargs["executable_path"] = chromium_path
         self._browser = await self._playwright.chromium.launch(
             headless=True,
-            executable_path=chromium_path,
+            **launch_kwargs,
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
