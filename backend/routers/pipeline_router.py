@@ -145,8 +145,17 @@ async def _run_pipeline(project_id: str) -> None:
         await _set_status(project_id, "error", "OCR & vertaling…", str(exc))
         return
 
-    # ── Done — move to Review ───────────────────────────────────────────────
-    await _set_status(project_id, "review", "Klaar voor review")
+    # ── Done — move to Review (or straight to export with AUTO_APPROVE=1) ──
+    import os  # noqa: PLC0415
+    if os.getenv("AUTO_APPROVE") == "1":
+        # Hands-off mode: skip manual review, approve + start export
+        # immediately — same behaviour as the /approve endpoint. The
+        # compositor's _EXPORT_LOCK still serialises the actual exports.
+        await _set_status(project_id, "approved", "Video exporteren… (auto)")
+        from routers.compositor import _start_export_job  # noqa: PLC0415
+        await _start_export_job(project_id)
+    else:
+        await _set_status(project_id, "review", "Klaar voor review")
 
 
 # ── Queue worker ───────────────────────────────────────────────────────────────

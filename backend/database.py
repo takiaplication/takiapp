@@ -109,6 +109,9 @@ async def init_db():
             ("messages", "story_group_id", "TEXT"),
             ("projects", "views", "INTEGER DEFAULT 0"),
             ("slides", "meme_source_path", "TEXT"),
+            # posted_at: set by external posting worker via /mark-posted;
+            # NULL = not yet posted to TikTok/Instagram
+            ("projects", "posted_at", "TIMESTAMP DEFAULT NULL"),
         ]
         for table, col, definition in migrations:
             try:

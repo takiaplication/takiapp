@@ -266,6 +266,29 @@ async def _build_project_json(project_id: str) -> Optional[dict]:
     }
 
 
+@router.patch("/projects/{project_id}/mark-posted")
+async def mark_posted(project_id: str):
+    """
+    Mark a project as posted to TikTok/Instagram. Called by the external
+    posting worker after a successful upload. Sets posted_at to current UTC.
+    """
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    now = datetime.now(timezone.utc).isoformat()
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "UPDATE projects SET posted_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (now, project_id),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Project not found")
+    finally:
+        await db.close()
+    return {"success": True, "posted_at": now}
+
+
 @router.get("/projects/{project_id}/json")
 async def get_project_json(project_id: str):
     """Return the full project JSON — enough to regenerate the MP4."""

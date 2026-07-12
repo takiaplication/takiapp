@@ -164,6 +164,175 @@ async def translate_text(
     return _clean_post_translation(raw)
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Style references — transcripts of the 10 best-performing reels (100k+
+# views). Injected ONCE at system level in batch_translate_conversation so
+# GPT rewrites in this exact register instead of doing literal translation.
+# ───────────────────────────────────────────────────────────────────────────
+
+STYLE_REFERENCES = """
+[1] (130k views)
+Hij: wat is je naam
+Zij: Waarom wil je dat weten?
+Hij: Gwn ff de naam weten van wat ik wil voor kerst
+Zij: Kerst is maanden weg 😭
+Hij: de wacht kan ver weg zijn…
+Hij: maar het doel is recht voor me
+Zij: ik ben niet zo speciaal 😭
+Zij: Ik ben maar een 6/10
+Hij: Dan is 6 de nieuwe 10
+Zij: Wow
+Zij: ik ben vrij.. vanavond
+Zij: wil je bellen?
+
+[2] (430k views)
+Hij: wacht ff, heb je meerdere accounts??
+Zij: nee dit is m'n enige account??
+Zij: waarom vraag je dat?
+Hij: Ik ben er vrij zeker van dat ik andere accounts heb gezien die jouw foto's gebruiken
+Zij: whaaattt???
+Zij: stuur me de @ please!!
+Hij: het is @nasa
+Zij: huh??
+Zij: nasa? Het ruimtebedrijf?
+Hij: ja want je bent uit deze wereld 🌎
+Zij: omgggg 😂
+Zij: Je bent smooth
+Zij: Maar je maakte me echt bang 😂😭
+Hij: gwn een manier om je aandacht te trekken frrr 🤷
+Zij: ja, dat heb je zeker gekregen
+Zij: dat is waarschijnlijk de meest creatieve manier waarop iemand in m'n DM's is geslide
+Hij: ik zou alles doen om jouw aandacht te krijgen
+Zij: ja en tot nu toe laat je me blozen
+Hij: maar ik heb je nummer nog niet gekregen???
+Hij: wil je is iets gaan eten?
+Zij: gaan we echt uit eten???
+Zij: of probeer je gelijk naar het dessert te gaan
+
+[3] (128k views)
+Hij: weet je het verschil tussen geschiedenis en jou?
+Zij: nee
+Zij: vertel maar
+Hij: geschiedenis is het verleden
+Hij: en jij bent mijn toekomst
+Zij: je bent smooth
+Hij: ken je Einstein?
+Zij: tuurlijk
+Hij: hij zei dat niets sneller is dan licht
+Zij: oké?
+Hij: maar hij heeft nooit gezien hoe snel ik voor jou viel
+Zij: gebruik je die lines op iedereen?
+Hij: eerste keer dat ik het gebruik op een dame
+Zij: je bent een smooth talker hé?
+Hij: slide me je nummer en ik laat je zien dat ik het meen
+Zij: oké +316445678864334
+
+[4] (300k views)
+Hij: Ben je single of gwn slecht beveiligd?
+Zij: ik heb een boyfriend, sorry
+Hij: ik zag de pic in je highlights
+Hij: dacht dat hij de gay best friend was
+Zij: nee 😭
+Zij: wat maakt dat je dat denkt?
+Hij: het was meer wishful thinking
+Hij: is hij goed voor je?
+Zij: hij behandelt me wel goed
+Hij: maar…..
+Zij: maar er is geen maar 😭 we zijn heel gelukkig
+Hij: maar je zou niet alleen gelukkig zijn met mij, je zou vervuld zijn 🤷
+Zij: is dat wat je doet?
+Zij: proberen te chatten met chicks in een relatie?
+Hij: ik red meiden uit situaties waar ze niet in willen zitten
+Hij: maar single meiden zijn niet echt mijn type
+Zij: dus je maakt relaties kapot?
+Hij: ik geef voorkeur aan de term bevrijder
+Hij: ik help mensen ontsnappen
+Zij: is dat zo
+Zij: hij steekt geen moeite meer in onze relatie tbh
+Hij: je bent niet moeilijk te pleasen
+Hij: maar hij vindt het moeilijk om jou te pleasen
+Hij: kon ik niet zijn
+Zij: en hoe zou je me pleasen?
+
+[5] (200k views)
+Hij: gelukkige verjaardag
+Zij: ik ben niet jarig??
+Hij: waarom zie je er dan zo goed uit vandaag?
+Zij: aww thanks, dat maakt me blij 😙
+Zij: beste tot nu toe
+Hij: als ik je blij maak kan jij me dan ook blij maken?
+Hij: met je nummer
+Zij: hahah ja 😂
+
+[6] (70k views)
+Hij: ben je nog steeds pissed?
+Zij: ja
+Hij: ik ken 70 manieren om je blij te maken
+Zij: oké wat is de eerste?
+Hij: je bloemen kopen
+Zij: en de rest?
+Hij: 69
+Zij: 😭😂
+Zij: je kan niet serieus zijn
+
+[7] (150k views)
+Hij: de big bang had nooit zo iets moois kunnen maken
+Zij: hahah
+Zij: dus geloof je in de big bang?
+Hij: ik denk dat god wist wat hij deed toen hij jou maakte
+Zij: dankjeee 😙
+Zij: maar ik heb geen gevoelens voor jou
+Hij: daar ging ik ook niet van uit
+Zij: dacht dat je daarom hier was???
+Hij: bloemen groeien niet van de ene op de andere dag, goede dingen hebben tijd nodig
+Zij: klopt
+Zij: ik zou je een kans geven
+Zij: wil je bellen?
+
+[8] (130k views)
+Hij: klop klop
+Zij: wie is daar?
+Hij: kans
+Zij: kans wie
+Hij: kans om elkaar misschien te leren kennen
+Zij: misschien…
+Hij: waar ik vandaan kom is dat een ja
+Zij: en waar kom jij vandaan?
+Hij: ergens tussen je boyfriend en je volgende side piece
+Zij: ben echt sprakeloos
+Hij: moet ik je ff tijd geven om te bekomen
+Zij: nee ik kan met alles omgaan hoor
+Hij: ik denk niet dat je met mij kunt omgaan 😉
+Zij: moet ik mezelf bewijzen dan?
+Hij: daar zeg ik geen nee op
+Hij: fix nummer
+Zij: oké +316874479075678997
+
+[9] (230k views)
+Hij: jullie maken het veel te moeilijk om te kiezen. Waarom neem ik jullie niet gwn allebei?
+Zij: hahah
+Zij: denk je dat je ons beide wel aankunt?
+Hij: ik ben zeker!
+Hij: hebben jullie al gedeeld?
+Hij: of zou het de eerste keer zijn??
+Zij: mhm, en wat maakt ons dan zo 'speciaal'?
+Hij: jullie zijn een gevaarlijk duo
+Hij: maar ik zou het gwn compleet maken
+
+[10] (100k views)
+Hij: ik goon op je highlights
+Zij: excuseer???
+Zij: is dat je eerste bericht
+Hij: ik moest je aandacht op een manier krijgen
+Zij: zo speciaal ben ik toch ook niet?
+Hij: ik denk heel de dag aan je
+Zij: dat is fucking corny
+Zij: maar op een manier wel schattig
+Hij: fix nummer dan
+Zij: ok +316435689087
+"""
+
+
 async def batch_translate_conversation(
     messages: list[dict],
     target_lang: str = "nl",
@@ -214,24 +383,36 @@ async def batch_translate_conversation(
                 {
                     "role": "system",
                     "content": (
-                        f"Je krijgt een volledig Instagram DM-gesprek. "
-                        f"Vertaal elk bericht naar CONSISTENT {lang_name} straatjeugdtaal. "
-                        "Gebruik EXACT dezelfde slang-keuze door het hele gesprek: "
-                        "als 'gooning' 'raggen' is, dan overal 'raggen'. "
-                        "Match de rauwe toon EXACT — maak het NOOIT netter dan het origineel. "
-                        "Schuttingtaal blijft schuttingtaal. Bewaar alle emojis. "
+                        "Je schrijft Nederlandse chatberichten voor korte social media "
+                        "video's (TikTok/Instagram Reels) voor een Belgisch/Nederlands "
+                        "publiek. Je krijgt een volledig Instagram DM-gesprek. "
                         "\n\n"
-                        "VERBODEN WOORDEN — gebruik deze NOOIT in de vertaling: "
-                        "'bro', 'man', 'mano', 'broer' als aanspreekvorm. "
-                        "Zelfs als ze in de brontekst staan, vertaal je ze naar iets anders "
-                        "of laat je ze gewoon weg. "
+                        "Vertaal NIET letterlijk vanuit het Engels. Herschrijf elk bericht "
+                        "in de stijl, toon en woordkeuze van deze best-presterende "
+                        "referentie-video's (100k+ views):\n"
+                        f"{STYLE_REFERENCES}"
                         "\n\n"
-                        "COMPLIMENT-REGEL: alle vormen van 'dat doe je goed', "
+                        "REGELS:\n"
+                        "- Schrijf zoals een echte Nederlandstalige jongere chat — casual, "
+                        "punchy, natuurlijk. Gebruik de zinsstructuren en uitdrukkingen "
+                        "uit de referenties, geen Google Translate-taal.\n"
+                        "- Behoud de emotie en humor van het origineel, maar in "
+                        "authentiek Nederlands.\n"
+                        "- Wees CONSISTENT door het hele gesprek: dezelfde slang-keuze "
+                        "voor hetzelfde woord, overal.\n"
+                        "- Match de rauwe toon EXACT — maak het NOOIT netter dan het "
+                        "origineel. Schuttingtaal blijft schuttingtaal. "
+                        "Bewaar alle emojis.\n"
+                        "- VERBODEN WOORDEN — gebruik NOOIT: 'bro', 'man', 'mano', "
+                        "'broer' als aanspreekvorm. Zelfs als ze in de brontekst staan, "
+                        "laat je ze weg of los je het anders op.\n"
+                        "- COMPLIMENT-REGEL: alle vormen van 'dat doe je goed', "
                         "'amai je bent goed', 'kei goed', 'je bent goed', 'smooth', "
-                        "'je bent zwaar goed' worden ALTIJD vertaald als de exacte zin "
-                        "'je bent smooth' (geen variaties). "
-                        "\n\n"
-                        "Geef ALLEEN een JSON-array terug met dezelfde slide- en index-waarden:\n"
+                        "'je bent zwaar goed' worden ALTIJD exact 'je bent smooth' "
+                        "(geen variaties).\n"
+                        "\n"
+                        "Geef ALLEEN een JSON-array terug met dezelfde slide- en "
+                        "index-waarden:\n"
                         '[{"slide": 1, "index": 0, "text": "..."}, ...]'
                     ),
                 },
