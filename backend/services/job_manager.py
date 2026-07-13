@@ -76,6 +76,21 @@ class JobManager:
         task = asyncio.create_task(run())
         self._tasks[job_id] = task
 
+    async def wait(self, job_id: str) -> None:
+        """
+        Block until the job's task has fully finished (completed OR failed).
+        Used by the pipeline worker to keep the factory strictly sequential:
+        the next queued project may only start once the previous one is
+        exported, uploaded to Post Bridge and cleaned up. No-op when the
+        task is unknown (e.g. already finished and reaped).
+        """
+        task = self._tasks.get(job_id)
+        if task is not None:
+            try:
+                await asyncio.shield(task)
+            except Exception:
+                pass  # job errors are recorded in the jobs table, not raised
+
     async def stream_progress(self, job_id: str) -> AsyncGenerator[dict, None]:
         queue = self._queues.get(job_id)
         if not queue:

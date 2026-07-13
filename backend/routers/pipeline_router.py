@@ -254,7 +254,12 @@ async def _run_pipeline(project_id: str) -> None:
             return
         await _set_status(project_id, "approved", "Video exporteren… (auto)")
         from routers.compositor import _start_export_job  # noqa: PLC0415
-        await _start_export_job(project_id)
+        export_job_id = await _start_export_job(project_id)
+        # Strictly sequential factory: hold the pipeline lock until this
+        # video is fully exported, uploaded to Post Bridge and wiped from
+        # disk. Only then may the queue worker pick up the next project —
+        # so at any moment at most ONE project exists beyond the queue.
+        await job_manager.wait(export_job_id)
     else:
         await _set_status(project_id, "review", "Klaar voor review")
 
