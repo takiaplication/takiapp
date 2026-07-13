@@ -268,6 +268,17 @@ function ProjectCard({
 
       {isLibrary && (
         <div className="mt-1 flex flex-col gap-1.5">
+          {/* TikTok schedule/posted status */}
+          {project.pipeline_step === 'Gepost op TikTok' ? (
+            <div className="flex items-center justify-center gap-1.5 bg-emerald-900/60 border border-emerald-700 text-emerald-300 text-xs font-semibold py-1.5 px-3 rounded-lg">
+              ✓ Gepost op TikTok
+            </div>
+          ) : project.pipeline_step?.startsWith('Ingepland') ? (
+            <div className="flex items-center justify-center gap-1.5 bg-purple-900/60 border border-purple-700 text-purple-300 text-xs font-semibold py-1.5 px-3 rounded-lg">
+              🕐 {project.pipeline_step}
+            </div>
+          ) : null}
+
           {project.drive_url ? (
             <a
               href={project.drive_url}
