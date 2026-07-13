@@ -201,16 +201,16 @@ async def schedule_post(
 # 10 vaste, altijd toepasbare captions — per post wordt er willekeurig één
 # gekozen zodat niet elke dag exact dezelfde tekst verschijnt.
 CAPTIONS = [
-    "zo doe je het boys 😌 #rizz #texting #huzz",
-    "wacht op het einde 😧🔥 #rizz #shootyourshot #fyp",
-    "hij schoot zijn schot... 😭 #shootyourshot #texting #viral",
-    "let op en leer 📝 #rizzgod #takenotes #texting",
-    "dit moet je zien 👀 #rizz #texts #fyp",
-    "smooth of niet? 🤔 #rizz #texting #huzz #viral",
-    "POV: je weet hoe het moet 😌 #rizzler #texting #fyp",
-    "de laatste zin 💀 #rizz #texts #shootyourshot",
-    "kijk en leer 😏 #rizzgod #huzz #takenotes",
-    "beter dan je beste vriend het kan 🔥 #rizz #texting #viral",
+    "zo doe je het boys 😌 #taki #rizz #texting #huzz",
+    "wacht op het einde 😧🔥 #taki #rizz #shootyourshot #fyp",
+    "taki ai doet het weer 😭 #taki #shootyourshot #texting #viral",
+    "let op en leer 📝 #taki #rizzgod #takenotes #texting",
+    "dit moet je zien 👀 #taki #rizz #texts #fyp",
+    "smooth of niet? 🤔 #taki #rizz #texting #huzz #viral",
+    "POV: je hebt taki ai 😌 #taki #rizzler #texting #fyp",
+    "de laatste zin 💀 #taki #rizz #texts #shootyourshot",
+    "kijk en leer 😏 #taki #rizzgod #huzz #takenotes",
+    "taki ai > je beste vriend 🔥 #taki #rizz #texting #viral",
 ]
 
 
