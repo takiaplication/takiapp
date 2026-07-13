@@ -745,6 +745,33 @@ async def admin_postbridge_check():
             ]
         else:
             out["posts_error"] = f"HTTP {rp.status_code}: {rp.text[:200]}"
+
+        # Post-results: per-platform publish outcomes (incl. failures)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            rr = await client.get(
+                "https://api.post-bridge.com/v1/post-results",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+        if rr.status_code == 200:
+            qq = rr.json()
+            results = qq.get("data", qq) if isinstance(qq, dict) else qq
+            out["post_results"] = (results or [])[:10]
+        else:
+            out["post_results_error"] = f"HTTP {rr.status_code}: {rr.text[:200]}"
+
+        # Our own DB view: which projects claim a Post Bridge post id
+        db = await get_db()
+        try:
+            rows = await (await db.execute(
+                """SELECT name, postbridge_post_id, scheduled_at, posted_at,
+                          pipeline_step
+                   FROM projects
+                   WHERE postbridge_post_id IS NOT NULL
+                   ORDER BY updated_at DESC LIMIT 10"""
+            )).fetchall()
+            out["db_scheduled_projects"] = [dict(r) for r in rows]
+        finally:
+            await db.close()
     except Exception as exc:
         out["error"] = f"Verbinding met Post Bridge mislukt: {exc}"
     return out
