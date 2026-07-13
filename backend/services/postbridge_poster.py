@@ -196,6 +196,29 @@ async def schedule_post(
     return {"post_id": post_id, "scheduled_at": iso_utc, "media_id": media_id}
 
 
+# ── Captions ─────────────────────────────────────────────────────────────────
+
+# 10 vaste, altijd toepasbare captions — per post wordt er willekeurig één
+# gekozen zodat niet elke dag exact dezelfde tekst verschijnt.
+CAPTIONS = [
+    "zo doe je het boys 😌 #rizz #texting #huzz",
+    "wacht op het einde 😧🔥 #rizz #shootyourshot #fyp",
+    "hij schoot zijn schot... 😭 #shootyourshot #texting #viral",
+    "let op en leer 📝 #rizzgod #takenotes #texting",
+    "dit moet je zien 👀 #rizz #texts #fyp",
+    "smooth of niet? 🤔 #rizz #texting #huzz #viral",
+    "POV: je weet hoe het moet 😌 #rizzler #texting #fyp",
+    "de laatste zin 💀 #rizz #texts #shootyourshot",
+    "kijk en leer 😏 #rizzgod #huzz #takenotes",
+    "beter dan je beste vriend het kan 🔥 #rizz #texting #viral",
+]
+
+
+def pick_caption() -> str:
+    """Random caption uit de vaste pool van 10."""
+    return random.choice(CAPTIONS)
+
+
 async def next_slot_from_db() -> datetime:
     """Read the latest scheduled_at from the DB and compute the next slot."""
     from database import get_db  # noqa: PLC0415

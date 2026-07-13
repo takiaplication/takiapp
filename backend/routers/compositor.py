@@ -414,6 +414,7 @@ async def _start_export_job(project_id: str) -> str:
             is_configured as _pb_configured,
             next_slot_from_db,
             schedule_post,
+            pick_caption,
             PostBridgeError,
         )
 
@@ -431,7 +432,7 @@ async def _start_export_job(project_id: str) -> str:
             await progress_callback(0.97, "Inplannen op TikTok via Post Bridge…")
             try:
                 slot_utc = await next_slot_from_db()
-                result = await schedule_post(output_path, slot_utc)
+                result = await schedule_post(output_path, slot_utc, caption=pick_caption())
                 pb_post_id = result["post_id"]
                 scheduled_iso = result["scheduled_at"]
                 await asyncio.to_thread(cleanup_project_output, project_id)
@@ -818,6 +819,7 @@ async def retry_post(project_id: str):
         is_configured as _pb_configured,
         next_slot_from_db,
         schedule_post,
+        pick_caption,
         PostBridgeError,
     )
 
@@ -834,7 +836,7 @@ async def retry_post(project_id: str):
 
     try:
         slot_utc = await next_slot_from_db()
-        result = await schedule_post(output_path, slot_utc)
+        result = await schedule_post(output_path, slot_utc, caption=pick_caption())
     except PostBridgeError as pe:
         raise HTTPException(status_code=502, detail=str(pe)) from pe
 
