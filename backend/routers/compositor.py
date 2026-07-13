@@ -673,6 +673,61 @@ async def admin_cleanup_volume():
     }
 
 
+@router.get("/admin/postbridge-check")
+async def admin_postbridge_check():
+    """
+    Diagnostic: verifies the Post Bridge configuration end-to-end without
+    posting anything. Shows whether the API key works and which social
+    accounts are connected.
+    """
+    import os
+    import httpx
+
+    key = os.environ.get("POSTBRIDGE_API_KEY", "").strip()
+    auto_post = os.environ.get("AUTO_POST_TIKTOK", "1").strip()
+    auto_approve = os.environ.get("AUTO_APPROVE", "").strip()
+
+    out = {
+        "api_key_set": bool(key),
+        "api_key_prefix": key[:8] if key else "",
+        "auto_post_tiktok": auto_post,
+        "auto_approve": auto_approve,
+        "will_post": bool(key) and auto_post != "0",
+        "accounts": None,
+        "tiktok_account_found": False,
+        "error": None,
+    }
+    if not key:
+        out["error"] = "POSTBRIDGE_API_KEY ontbreekt in Railway Variables"
+        return out
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                "https://api.post-bridge.com/v1/social-accounts",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+        if resp.status_code != 200:
+            out["error"] = f"HTTP {resp.status_code}: {resp.text[:300]}"
+            return out
+        payload = resp.json()
+        accounts = payload.get("data", payload) if isinstance(payload, dict) else payload
+        out["accounts"] = [
+            {
+                "id": a.get("id"),
+                "platform": a.get("platform"),
+                "username": a.get("username") or a.get("name"),
+            }
+            for a in (accounts or [])
+        ]
+        out["tiktok_account_found"] = any(
+            "tiktok" in str(a.get("platform", "")).lower() for a in (accounts or [])
+        )
+    except Exception as exc:
+        out["error"] = f"Verbinding met Post Bridge mislukt: {exc}"
+    return out
+
+
 # ── Post Bridge: webhook + retry ────────────────────────────────────────────
 
 @router.post("/webhooks/postbridge")
