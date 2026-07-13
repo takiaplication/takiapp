@@ -724,6 +724,27 @@ async def admin_postbridge_check():
         out["tiktok_account_found"] = any(
             "tiktok" in str(a.get("platform", "")).lower() for a in (accounts or [])
         )
+
+        # Recent posts — so we can see server-side what Post Bridge really has
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            rp = await client.get(
+                "https://api.post-bridge.com/v1/posts",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+        if rp.status_code == 200:
+            pp = rp.json()
+            posts = pp.get("data", pp) if isinstance(pp, dict) else pp
+            out["posts"] = [
+                {
+                    "id": p.get("id"),
+                    "status": p.get("status"),
+                    "scheduled_at": p.get("scheduled_at"),
+                    "caption": (p.get("caption") or "")[:60],
+                }
+                for p in (posts or [])[:10]
+            ]
+        else:
+            out["posts_error"] = f"HTTP {rp.status_code}: {rp.text[:200]}"
     except Exception as exc:
         out["error"] = f"Verbinding met Post Bridge mislukt: {exc}"
     return out
