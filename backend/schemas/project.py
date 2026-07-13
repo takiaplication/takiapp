@@ -35,3 +35,6 @@ class LibraryItem(BaseModel):
     drive_url: Optional[str] = None
     views: int = 0
     pipeline_error: Optional[str] = None
+    scheduled_at: Optional[str] = None   # UTC ISO — Post Bridge publish slot
+    posted_at: Optional[str] = None      # set via webhook once live on TikTok
+    pipeline_step: Optional[str] = None  # e.g. "Ingepland: 14-07 16:20"

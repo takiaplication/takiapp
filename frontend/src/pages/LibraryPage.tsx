@@ -3,9 +3,20 @@ import {
   getLibrary,
   getLibraryExportAllUrl,
   regenerateProject,
+  retryPost,
   updateProjectViews,
 } from '../api/projects'
 import type { LibraryItem } from '../api/projects'
+
+function fmtSlot(iso: string): string {
+  return new Date(iso).toLocaleString('nl-BE', {
+    timeZone: 'Europe/Brussels',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('nl-NL', {
@@ -130,6 +141,19 @@ export default function LibraryPage() {
                     </div>
                   )}
 
+                  {/* TikTok schedule/posted badge (top-left) */}
+                  {item.posted_at ? (
+                    <div className="absolute top-2 left-2 bg-emerald-600/90 backdrop-blur-sm
+                                    text-white text-[11px] font-semibold px-2 py-1 rounded-md">
+                      ✓ Gepost
+                    </div>
+                  ) : item.scheduled_at ? (
+                    <div className="absolute top-2 left-2 bg-purple-600/90 backdrop-blur-sm
+                                    text-white text-[11px] font-semibold px-2 py-1 rounded-md">
+                      🕐 {fmtSlot(item.scheduled_at)}
+                    </div>
+                  ) : null}
+
                   {/* Hover overlay */}
                   <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100
                                   transition-opacity flex flex-col items-center justify-center gap-2 p-3">
@@ -175,13 +199,33 @@ export default function LibraryPage() {
                   </div>
                 </div>
 
-                {/* Drive-upload failure banner — always visible when no Drive URL */}
-                {!item.drive_url && item.pipeline_error && (
+                {/* Publish failure banner (Post Bridge of Drive) */}
+                {item.pipeline_error && (
                   <div className="px-3 py-2 bg-red-950/60 border-t border-red-800">
-                    <p className="text-[11px] text-red-300 font-semibold mb-1">⚠ Drive upload mislukt</p>
+                    <p className="text-[11px] text-red-300 font-semibold mb-1">
+                      ⚠ {item.pipeline_step === 'TikTok-post mislukt'
+                        ? 'TikTok-post mislukt'
+                        : 'Upload mislukt'}
+                    </p>
                     <p className="text-[10px] text-red-300/80 font-mono leading-snug break-words line-clamp-3">
                       {item.pipeline_error}
                     </p>
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        try {
+                          await retryPost(item.id)
+                          getLibrary().then(setItems)
+                        } catch (err: any) {
+                          alert(err?.response?.data?.detail ?? 'Retry mislukt')
+                        }
+                      }}
+                      className="mt-1.5 w-full bg-red-600 hover:bg-red-500 text-white text-[11px]
+                                 font-semibold px-2 py-1.5 rounded transition-colors"
+                    >
+                      ↻ Opnieuw inplannen
+                    </button>
                   </div>
                 )}
 

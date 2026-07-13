@@ -12,6 +12,7 @@ from routers import import_router
 from routers import app_settings as app_settings_router
 from routers import meme_library_router
 from routers import pipeline_router
+from routers import story_library_router
 
 
 async def _cleanup_library_intermediates() -> None:
@@ -190,3 +191,4 @@ app.include_router(import_router.router, prefix="/api")
 app.include_router(app_settings_router.router, prefix="/api")
 app.include_router(meme_library_router.router, prefix="/api")
 app.include_router(pipeline_router.router, prefix="/api")
+app.include_router(story_library_router.router, prefix="/api")

@@ -41,6 +41,16 @@ export default function PageShell({ children }: Props) {
           >
             🎬 Library
           </Link>
+          <Link
+            to="/assets"
+            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+              pathname === '/assets'
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
+            }`}
+          >
+            📸 Assets
+          </Link>
         </nav>
 
         <button

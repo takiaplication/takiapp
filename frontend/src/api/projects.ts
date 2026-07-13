@@ -236,6 +236,57 @@ export interface LibraryItem {
   drive_url: string | null
   views: number
   pipeline_error: string | null
+  scheduled_at: string | null
+  posted_at: string | null
+  pipeline_step: string | null
+}
+
+// --- Story & music libraries (autonomous mode assets) ---
+
+export interface AssetItem {
+  filename: string
+  url: string
+}
+
+export interface AssetList {
+  count: number
+  items: AssetItem[]
+}
+
+export async function getStoryLibrary(): Promise<AssetList> {
+  const res = await api.get('/story-library')
+  return res.data
+}
+
+export async function uploadStoryPhoto(file: File): Promise<AssetItem> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post('/story-library/upload', form)
+  return res.data
+}
+
+export async function deleteStoryPhoto(filename: string): Promise<void> {
+  await api.delete(`/story-library/${encodeURIComponent(filename)}`)
+}
+
+export async function getMusicLibrary(): Promise<AssetList> {
+  const res = await api.get('/music-library')
+  return res.data
+}
+
+export async function uploadMusicTrack(file: File): Promise<AssetItem> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post('/music-library/upload', form)
+  return res.data
+}
+
+export async function deleteMusicTrack(filename: string): Promise<void> {
+  await api.delete(`/music-library/${encodeURIComponent(filename)}`)
+}
+
+export async function retryPost(projectId: string): Promise<void> {
+  await api.post(`/projects/${projectId}/retry-post`)
 }
 
 export async function getLibrary(): Promise<LibraryItem[]> {

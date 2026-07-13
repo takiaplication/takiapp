@@ -138,7 +138,8 @@ async def list_library():
     db = await get_db()
     try:
         cursor = await db.execute(
-            """SELECT id, name, created_at, thumbnail_path, drive_url, views, pipeline_error
+            """SELECT id, name, created_at, thumbnail_path, drive_url, views,
+                      pipeline_error, pipeline_step, scheduled_at, posted_at
                FROM projects
                WHERE status='library'
                ORDER BY created_at DESC""",
@@ -147,16 +148,22 @@ async def list_library():
     finally:
         await db.close()
 
+    def _get(r, key):
+        return r[key] if key in r.keys() else None
+
     return [
         LibraryItem(
             id=r["id"],
             name=r["name"],
             created_at=r["created_at"],
-            thumbnail_url=_thumb_to_url(r["thumbnail_path"] if "thumbnail_path" in r.keys() else None),
+            thumbnail_url=_thumb_to_url(_get(r, "thumbnail_path")),
             download_url=f"/api/projects/{r['id']}/export/download",
-            drive_url=r["drive_url"] if "drive_url" in r.keys() else None,
-            views=int(r["views"]) if "views" in r.keys() and r["views"] is not None else 0,
-            pipeline_error=r["pipeline_error"] if "pipeline_error" in r.keys() else None,
+            drive_url=_get(r, "drive_url"),
+            views=int(r["views"]) if _get(r, "views") is not None else 0,
+            pipeline_error=_get(r, "pipeline_error"),
+            pipeline_step=_get(r, "pipeline_step"),
+            scheduled_at=_get(r, "scheduled_at"),
+            posted_at=_get(r, "posted_at"),
         )
         for r in rows
     ]

@@ -13,7 +13,11 @@ FONTS_DIR = BASE_DIR / "fonts"
 STORAGE_DIR = Path(os.environ.get("STORAGE_PATH", str(BASE_DIR / "storage")))
 PROJECTS_DIR = STORAGE_DIR / "projects"
 MEME_LIBRARY_DIR = STORAGE_DIR / "meme_library"   # shared Dutch meme library
+STORY_LIBRARY_DIR = STORAGE_DIR / "story_library"  # single-use story photos
+MUSIC_LIBRARY_DIR = STORAGE_DIR / "music_library"  # reusable background tracks
 DATABASE_PATH = STORAGE_DIR / "reelfactory.db"
 
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 MEME_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+STORY_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+MUSIC_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import KanbanDashboard from './pages/KanbanDashboard'
 import ProjectEditor from './pages/ProjectEditor'
 import LibraryPage from './pages/LibraryPage'
+import AssetsPage from './pages/AssetsPage'
 import PageShell from './components/layout/PageShell'
 
 function App() {
@@ -10,6 +11,7 @@ function App() {
       <Routes>
         <Route path="/" element={<KanbanDashboard />} />
         <Route path="/library" element={<LibraryPage />} />
+        <Route path="/assets" element={<AssetsPage />} />
         <Route path="/project/:projectId" element={<ProjectEditor />} />
       </Routes>
     </PageShell>

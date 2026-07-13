@@ -3,7 +3,7 @@ import random
 import shutil
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from database import get_db
@@ -361,13 +361,23 @@ async def _start_export_job(project_id: str) -> str:
         async def _compose_progress(p: float, msg: str) -> None:
             await progress_callback(0.8 + p * 0.2, msg)
 
+        # Autonomous audio: when the project has no explicit background
+        # music, pick a random track from the shared music library so
+        # auto-posted videos never go out silent.
+        music_path = settings.get("background_music_path")
+        if not music_path or not Path(music_path).exists():
+            from routers.story_library_router import pick_random_music  # noqa: PLC0415
+            music_path = pick_random_music()
+            if music_path:
+                print(f"[export] {project_id}: random music → {Path(music_path).name}")
+
         await compose_video(
             slides=slides,
             output_path=output_path,
             transition_type=settings["transition_type"],
             transition_duration_ms=settings["transition_duration_ms"],
             fps=settings["output_fps"],
-            music_path=settings.get("background_music_path"),
+            music_path=music_path,
             music_volume=settings["music_volume"],
             screen_recording_effect=True,   # always on — anti TikTok fingerprinting
             progress_callback=_compose_progress,
@@ -399,62 +409,101 @@ async def _start_export_job(project_id: str) -> str:
         if freed_early:
             print(f"[cleanup] {project_id}: freed {freed_early // (1024*1024)} MB post-export")
 
-        # ── Google Drive upload ───────────────────────────────────────────
-        await progress_callback(0.97, "Uploaden naar Google Drive…")
+        # ── Publish: Post Bridge (primary) or Google Drive (fallback) ─────
+        from services.postbridge_poster import (  # noqa: PLC0415
+            is_configured as _pb_configured,
+            next_slot_from_db,
+            schedule_post,
+            PostBridgeError,
+        )
+
         drive_url: Optional[str] = None
-        drive_error: Optional[str] = None
-        try:
-            from services.drive_uploader import upload_to_drive, DriveUploadError  # noqa: PLC0415
-            project_name = project_id[:8]
-            # Fetch the project name for a nicer filename
-            db_name = await get_db()
-            try:
-                name_row = await (await db_name.execute(
-                    "SELECT name FROM projects WHERE id=?", (project_id,)
-                )).fetchone()
-                if name_row and name_row["name"]:
-                    project_name = name_row["name"].replace("/", "-")[:60]
-            finally:
-                await db_name.close()
+        publish_error: Optional[str] = None
+        pipeline_step_done = "Export klaar"
+        scheduled_iso: Optional[str] = None
+        pb_post_id: Optional[str] = None
 
-            today = __import__("datetime").date.today().strftime("%Y-%m-%d")
-            filename = f"{today}_{project_name}.mp4"
+        if _pb_configured():
+            # ── Post Bridge: upload + schedule, then wipe EVERYTHING local.
+            # The queue of pending reels lives on Post Bridge's servers, so
+            # the Railway volume never holds more than the video currently
+            # being exported.
+            await progress_callback(0.97, "Inplannen op TikTok via Post Bridge…")
             try:
-                drive_url = await upload_to_drive(output_path, filename)
-            except DriveUploadError as de:
-                drive_error = str(de)
-                print(f"[drive] upload FAILED: {drive_error}")
-
-            if drive_url:
-                # Drive has the MP4 — drop the local copy too.
+                slot_utc = await next_slot_from_db()
+                result = await schedule_post(output_path, slot_utc)
+                pb_post_id = result["post_id"]
+                scheduled_iso = result["scheduled_at"]
                 await asyncio.to_thread(cleanup_project_output, project_id)
-                await progress_callback(0.99, f"Drive upload klaar → {drive_url}")
-            elif drive_error:
-                # Keep the local MP4 as a fallback so the user can still
-                # download it while they sort out the Drive configuration.
-                await progress_callback(0.99, "Drive upload mislukt — MP4 bewaard")
-        except Exception as drive_err:
-            # Defensive — should rarely trigger since DriveUploadError is
-            # already caught above. Keep the MP4 so the user isn't stuck.
-            drive_error = f"Unexpected Drive error: {drive_err}"
-            print(f"[drive] unexpected error (non-fatal): {drive_err}")
+                local_txt = slot_utc.astimezone(
+                    __import__("zoneinfo").ZoneInfo("Europe/Brussels")
+                ).strftime("%d-%m %H:%M")
+                pipeline_step_done = f"Ingepland: {local_txt}"
+                await progress_callback(0.99, f"Ingepland op TikTok: {local_txt}")
+            except PostBridgeError as pe:
+                publish_error = str(pe)
+                pipeline_step_done = "TikTok-post mislukt"
+                print(f"[postbridge] FAILED: {publish_error}")
+            except Exception as pe:
+                publish_error = f"Unexpected Post Bridge error: {pe}"
+                pipeline_step_done = "TikTok-post mislukt"
+                print(f"[postbridge] unexpected error: {pe}")
+        else:
+            # ── Legacy Google Drive flow (only when Post Bridge is not
+            # configured) ──────────────────────────────────────────────────
+            await progress_callback(0.97, "Uploaden naar Google Drive…")
+            try:
+                from services.drive_uploader import upload_to_drive, DriveUploadError  # noqa: PLC0415
+                project_name = project_id[:8]
+                db_name = await get_db()
+                try:
+                    name_row = await (await db_name.execute(
+                        "SELECT name FROM projects WHERE id=?", (project_id,)
+                    )).fetchone()
+                    if name_row and name_row["name"]:
+                        project_name = name_row["name"].replace("/", "-")[:60]
+                finally:
+                    await db_name.close()
 
-        # Mark project as 'library' once export succeeds.
-        # If Drive failed we still park the project in the Library column so
-        # the user can manage it, but we surface the error via pipeline_error.
+                today = __import__("datetime").date.today().strftime("%Y-%m-%d")
+                filename = f"{today}_{project_name}.mp4"
+                try:
+                    drive_url = await upload_to_drive(output_path, filename)
+                except DriveUploadError as de:
+                    publish_error = str(de)
+                    print(f"[drive] upload FAILED: {publish_error}")
+
+                if drive_url:
+                    await asyncio.to_thread(cleanup_project_output, project_id)
+                    await progress_callback(0.99, f"Drive upload klaar → {drive_url}")
+                elif publish_error:
+                    pipeline_step_done = "Drive upload mislukt"
+                    await progress_callback(0.99, "Drive upload mislukt — MP4 bewaard")
+            except Exception as drive_err:
+                publish_error = f"Unexpected Drive error: {drive_err}"
+                pipeline_step_done = "Drive upload mislukt"
+                print(f"[drive] unexpected error (non-fatal): {drive_err}")
+
+        # Mark project as 'library' once export succeeds. On publish failure
+        # the project still lands in Library (with the MP4 kept locally) and
+        # the error surfaces via pipeline_error + a retry button in the UI.
         db_done = await get_db()
         try:
             await db_done.execute(
                 """UPDATE projects SET status='library',
                    pipeline_step=?, pipeline_error=?,
                    thumbnail_path=?, drive_url=?,
+                   scheduled_at=COALESCE(?, scheduled_at),
+                   postbridge_post_id=COALESCE(?, postbridge_post_id),
                    updated_at=CURRENT_TIMESTAMP
                    WHERE id=?""",
                 (
-                    "Export klaar" if not drive_error else "Drive upload mislukt",
-                    drive_error,
+                    pipeline_step_done,
+                    publish_error,
                     thumb_path,
                     drive_url,
+                    scheduled_iso,
+                    pb_post_id,
                     project_id,
                 ),
             )
@@ -462,7 +511,7 @@ async def _start_export_job(project_id: str) -> str:
         finally:
             await db_done.close()
 
-        return drive_url or str(output_path)
+        return drive_url or scheduled_iso or str(output_path)
 
     async def do_export_with_error_capture(progress_callback):
         # If another export is already running, mark this one as waiting
@@ -622,3 +671,133 @@ async def admin_cleanup_volume():
         "orphans_removed": result["orphans_removed"],
         "outputs_removed": result["outputs_removed"],
     }
+
+
+# ── Post Bridge: webhook + retry ────────────────────────────────────────────
+
+@router.post("/webhooks/postbridge")
+async def postbridge_webhook(request: Request):
+    """
+    Receives Post Bridge webhook calls when a post finishes processing.
+    Sets posted_at on the matching project (found via postbridge_post_id).
+
+    Signature: when POSTBRIDGE_WEBHOOK_SECRET is set the raw body is
+    HMAC-SHA256 verified against the signature header; otherwise the
+    payload is accepted as-is (endpoint is unauthenticated but harmless —
+    it can only flip a timestamp on an existing post id).
+    """
+    import hashlib
+    import hmac as hmac_mod
+    import json as _json
+    import os
+
+    raw = await request.body()
+
+    secret = os.environ.get("POSTBRIDGE_WEBHOOK_SECRET", "").strip()
+    if secret:
+        provided = (
+            request.headers.get("x-signature")
+            or request.headers.get("x-postbridge-signature")
+            or request.headers.get("x-webhook-signature")
+            or ""
+        ).replace("sha256=", "").strip()
+        expected = hmac_mod.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+        if not provided or not hmac_mod.compare_digest(provided.lower(), expected.lower()):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    try:
+        payload = _json.loads(raw.decode("utf-8", errors="replace") or "{}")
+    except ValueError:
+        payload = {}
+    print(f"[postbridge-webhook] payload: {str(payload)[:500]}")
+
+    # The payload schema isn't documented — walk the JSON for a post id.
+    def _find_post_id(obj) -> Optional[str]:
+        if isinstance(obj, dict):
+            for key in ("post_id", "postId", "id"):
+                if key in obj and isinstance(obj[key], (str, int)):
+                    return str(obj[key])
+            for v in obj.values():
+                found = _find_post_id(v)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for v in obj:
+                found = _find_post_id(v)
+                if found:
+                    return found
+        return None
+
+    post_id = _find_post_id(payload)
+    if not post_id:
+        return {"ok": True, "matched": False, "reason": "no post id in payload"}
+
+    from datetime import datetime, timezone  # noqa: PLC0415
+    now = datetime.now(timezone.utc).isoformat()
+
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """UPDATE projects
+               SET posted_at=?, pipeline_step='Gepost op TikTok',
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE postbridge_post_id=? AND (posted_at IS NULL OR posted_at='')""",
+            (now, post_id),
+        )
+        await db.commit()
+        matched = cursor.rowcount > 0
+    finally:
+        await db.close()
+
+    return {"ok": True, "matched": matched, "post_id": post_id}
+
+
+@router.post("/projects/{project_id}/retry-post")
+async def retry_post(project_id: str):
+    """
+    Retry a failed Post Bridge upload for a library project. Requires the
+    local output.mp4 to still exist (it is kept on publish failure). When
+    the file is gone the caller should use /regenerate instead.
+    """
+    from services.postbridge_poster import (  # noqa: PLC0415
+        is_configured as _pb_configured,
+        next_slot_from_db,
+        schedule_post,
+        PostBridgeError,
+    )
+
+    if not _pb_configured():
+        raise HTTPException(status_code=400, detail="Post Bridge is not configured")
+
+    output_path = PROJECTS_DIR / project_id / "output.mp4"
+    if not output_path.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="output.mp4 is al opgeruimd — gebruik 'Regenereer video' "
+                   "en de export plant daarna automatisch opnieuw in.",
+        )
+
+    try:
+        slot_utc = await next_slot_from_db()
+        result = await schedule_post(output_path, slot_utc)
+    except PostBridgeError as pe:
+        raise HTTPException(status_code=502, detail=str(pe)) from pe
+
+    await asyncio.to_thread(cleanup_project_output, project_id)
+
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+    local_txt = slot_utc.astimezone(ZoneInfo("Europe/Brussels")).strftime("%d-%m %H:%M")
+
+    db = await get_db()
+    try:
+        await db.execute(
+            """UPDATE projects SET pipeline_step=?, pipeline_error=NULL,
+               scheduled_at=?, postbridge_post_id=?,
+               updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            (f"Ingepland: {local_txt}", result["scheduled_at"], result["post_id"], project_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    return {"ok": True, "scheduled_at": result["scheduled_at"], "post_id": result["post_id"]}

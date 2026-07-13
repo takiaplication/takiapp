@@ -112,6 +112,10 @@ async def init_db():
             # posted_at: set by external posting worker via /mark-posted;
             # NULL = not yet posted to TikTok/Instagram
             ("projects", "posted_at", "TIMESTAMP DEFAULT NULL"),
+            # Post Bridge integration: scheduled publish time (UTC ISO) and
+            # the Post Bridge post id for webhook correlation
+            ("projects", "scheduled_at", "TEXT"),
+            ("projects", "postbridge_post_id", "TEXT"),
         ]
         for table, col, definition in migrations:
             try:

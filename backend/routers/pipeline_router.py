@@ -72,6 +72,81 @@ async def _set_status(
         await db.close()
 
 
+# ── Autonomous quality gate ───────────────────────────────────────────────────
+
+async def validate_project_for_publish(project_id: str) -> list[str]:
+    """
+    Automated pre-publish checks for hands-off mode. Returns a list of
+    human-readable issues; empty list means the project is safe to export
+    and post without a human looking at it.
+
+    Checks:
+      1. At least one active slide.
+      2. No empty DM slides — every active dm slide has ≥1 message with
+         actual text (an empty screen is the #1 failure mode of OCR).
+      3. No blank messages — no active dm slide where >half the messages
+         are empty strings.
+      4. Story replies have a story photo that exists on disk (single-use
+         pool may have run dry).
+      5. Meme slides can be filled: either a remembered meme_source_path
+         exists or their category folder has at least one file.
+    """
+    from config import MEME_LIBRARY_DIR  # noqa: PLC0415
+
+    issues: list[str] = []
+    db = await get_db()
+    try:
+        slides = await (await db.execute(
+            """SELECT id, frame_type, meme_category, meme_source_path
+               FROM slides WHERE project_id=? AND is_active=1
+               ORDER BY sort_order""",
+            (project_id,),
+        )).fetchall()
+
+        if not slides:
+            return ["geen actieve slides"]
+
+        for idx, s in enumerate(slides, start=1):
+            ftype = (s["frame_type"] if "frame_type" in s.keys() else "dm") or "dm"
+
+            if ftype == "dm":
+                msgs = await (await db.execute(
+                    """SELECT text, message_type, story_image_path
+                       FROM messages WHERE slide_id=? ORDER BY sort_order""",
+                    (s["id"],),
+                )).fetchall()
+                texted = [m for m in msgs if (m["text"] or "").strip()]
+                if not msgs or not texted:
+                    issues.append(f"slide {idx}: leeg DM-scherm (geen tekst)")
+                elif len(texted) < len(msgs) / 2:
+                    issues.append(f"slide {idx}: meer dan de helft van de berichten is leeg")
+                for m in msgs:
+                    if m["message_type"] == "story_reply":
+                        sp = m["story_image_path"]
+                        if not sp or not Path(sp).exists():
+                            issues.append(
+                                f"slide {idx}: story-reply zonder story-foto "
+                                "(story-library leeg? vul aan via Assets)"
+                            )
+                            break
+
+            elif ftype == "meme":
+                stored = s["meme_source_path"] if "meme_source_path" in s.keys() else None
+                if stored and Path(stored).exists():
+                    continue
+                cat = (s["meme_category"] if "meme_category" in s.keys() else None) or "cooking"
+                cat_dir = MEME_LIBRARY_DIR / cat
+                has_files = cat_dir.exists() and any(
+                    f.is_file() for f in cat_dir.iterdir()
+                )
+                if not has_files:
+                    issues.append(f"slide {idx}: meme-categorie '{cat}' is leeg")
+    finally:
+        await db.close()
+
+    return issues
+
+
 # ── Full pipeline for one project ─────────────────────────────────────────────
 
 async def _run_pipeline(project_id: str) -> None:
@@ -145,12 +220,38 @@ async def _run_pipeline(project_id: str) -> None:
         await _set_status(project_id, "error", "OCR & vertaling…", str(exc))
         return
 
+    # ── Story photo: one per video, single-use, identical across slides ────
+    try:
+        from routers.story_library_router import claim_story_photo  # noqa: PLC0415
+        db_st = await get_db()
+        try:
+            has_story = await (await db_st.execute(
+                """SELECT 1 FROM messages m
+                   JOIN slides s ON s.id = m.slide_id
+                   WHERE s.project_id=? AND m.message_type='story_reply'
+                   LIMIT 1""",
+                (project_id,),
+            )).fetchone()
+        finally:
+            await db_st.close()
+        if has_story:
+            await claim_story_photo(project_id)
+    except Exception as story_err:
+        print(f"[story] claim failed for {project_id}: {story_err}")
+
     # ── Done — move to Review (or straight to export with AUTO_APPROVE=1) ──
     import os  # noqa: PLC0415
     if os.getenv("AUTO_APPROVE") == "1":
-        # Hands-off mode: skip manual review, approve + start export
-        # immediately — same behaviour as the /approve endpoint. The
-        # compositor's _EXPORT_LOCK still serialises the actual exports.
+        # Hands-off mode. Because nobody reviews these videos any more, run
+        # the automated quality gate first: anything suspicious is parked in
+        # Review with a clear error instead of being posted to TikTok.
+        issues = await validate_project_for_publish(project_id)
+        if issues:
+            await _set_status(
+                project_id, "review", "Autocheck gefaald",
+                "Autocheck: " + " | ".join(issues),
+            )
+            return
         await _set_status(project_id, "approved", "Video exporteren… (auto)")
         from routers.compositor import _start_export_job  # noqa: PLC0415
         await _start_export_job(project_id)
