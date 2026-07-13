@@ -151,7 +151,7 @@ async def schedule_post(
             headers=_headers(),
             json={"mime_type": "video/mp4", "size_bytes": size, "name": mp4_path.name},
         )
-        if r1.status_code != 200:
+        if r1.status_code not in (200, 201):
             raise PostBridgeError(
                 f"create-upload-url failed: HTTP {r1.status_code} {r1.text[:300]}"
             )
