@@ -772,6 +772,34 @@ async def admin_postbridge_check():
             out["db_scheduled_projects"] = [dict(r) for r in rows]
         finally:
             await db.close()
+
+        # Look up each DB post id individually at Post Bridge to see whether
+        # it really exists there (and in which status), or vanished.
+        lookups = {}
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for r in out["db_scheduled_projects"]:
+                pid_pb = r["postbridge_post_id"]
+                if not pid_pb:
+                    continue
+                try:
+                    lr = await client.get(
+                        f"https://api.post-bridge.com/v1/posts/{pid_pb}",
+                        headers={"Authorization": f"Bearer {key}"},
+                    )
+                    if lr.status_code == 200:
+                        body = lr.json()
+                        body = body.get("data", body) if isinstance(body, dict) else body
+                        lookups[pid_pb] = {
+                            "found": True,
+                            "status": body.get("status") if isinstance(body, dict) else None,
+                            "scheduled_at": body.get("scheduled_at") if isinstance(body, dict) else None,
+                        }
+                    else:
+                        lookups[pid_pb] = {"found": False, "http": lr.status_code,
+                                           "body": lr.text[:150]}
+                except Exception as le:
+                    lookups[pid_pb] = {"found": False, "error": str(le)}
+        out["post_lookups"] = lookups
     except Exception as exc:
         out["error"] = f"Verbinding met Post Bridge mislukt: {exc}"
     return out
