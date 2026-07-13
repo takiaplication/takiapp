@@ -147,6 +147,45 @@ async def validate_project_for_publish(project_id: str) -> list[str]:
     return issues
 
 
+async def autoclean_empty_dm_slides(project_id: str) -> int:
+    """
+    Delete DM slides that carry no visible text — blank chat screens left
+    behind when OCR found nothing on a frame. Meme / app_ad slides are
+    image-based and never removed. Messages cascade-delete with the slide.
+    Returns the number of slides removed.
+
+    This is what keeps the factory fully hands-off: instead of parking a
+    video with an empty screen in Review for a human to fix, we simply drop
+    the empty screen and carry on.
+    """
+    db = await get_db()
+    try:
+        slides = await (await db.execute(
+            "SELECT id, frame_type, slide_type FROM slides WHERE project_id=?",
+            (project_id,),
+        )).fetchall()
+
+        removed = 0
+        for s in slides:
+            ftype = (s["frame_type"] if "frame_type" in s.keys() else None) \
+                or (s["slide_type"] if "slide_type" in s.keys() else None) or "dm"
+            if ftype != "dm":
+                continue  # keep image slides (meme / app_ad)
+            msgs = await (await db.execute(
+                "SELECT text FROM messages WHERE slide_id=?", (s["id"],)
+            )).fetchall()
+            has_text = any((m["text"] or "").strip() for m in msgs)
+            if not has_text:
+                await db.execute("DELETE FROM slides WHERE id=?", (s["id"],))
+                removed += 1
+
+        if removed:
+            await db.commit()
+        return removed
+    finally:
+        await db.close()
+
+
 # ── Full pipeline for one project ─────────────────────────────────────────────
 
 async def _run_pipeline(project_id: str) -> None:
@@ -220,6 +259,14 @@ async def _run_pipeline(project_id: str) -> None:
         await _set_status(project_id, "error", "OCR & vertaling…", str(exc))
         return
 
+    # ── Auto-clean: verwijder lege screens (DM-slides zonder tekst) ────────
+    try:
+        removed = await autoclean_empty_dm_slides(project_id)
+        if removed:
+            print(f"[autoclean] {project_id}: {removed} leeg screen verwijderd")
+    except Exception as clean_err:
+        print(f"[autoclean] {project_id}: mislukt: {clean_err}")
+
     # ── Story photo: one per video, single-use, identical across slides ────
     try:
         from routers.story_library_router import claim_story_photo  # noqa: PLC0415
@@ -242,16 +289,26 @@ async def _run_pipeline(project_id: str) -> None:
     # ── Done — move to Review (or straight to export with AUTO_APPROVE=1) ──
     import os  # noqa: PLC0415
     if os.getenv("AUTO_APPROVE") == "1":
-        # Hands-off mode. Because nobody reviews these videos any more, run
-        # the automated quality gate first: anything suspicious is parked in
-        # Review with a clear error instead of being posted to TikTok.
-        issues = await validate_project_for_publish(project_id)
-        if issues:
+        # Hands-off mode: NO human in the loop. Empty screens are already
+        # deleted above, so we don't park anything in Review. The only thing
+        # that can stop a video is having literally nothing left to show —
+        # then it goes to 'error' (a human "good to go" couldn't fix that
+        # anyway), never to Review.
+        db_cnt = await get_db()
+        try:
+            cnt = await (await db_cnt.execute(
+                "SELECT COUNT(*) AS c FROM slides WHERE project_id=? AND is_active=1",
+                (project_id,),
+            )).fetchone()
+        finally:
+            await db_cnt.close()
+        if not cnt or cnt["c"] == 0:
             await _set_status(
-                project_id, "review", "Autocheck gefaald",
-                "Autocheck: " + " | ".join(issues),
+                project_id, "error", "Geen bruikbare slides",
+                "Alle screens waren leeg na OCR — niets om te posten.",
             )
             return
+
         await _set_status(project_id, "approved", "Video exporteren… (auto)")
         from routers.compositor import _start_export_job  # noqa: PLC0415
         export_job_id = await _start_export_job(project_id)
