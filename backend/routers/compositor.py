@@ -218,6 +218,31 @@ async def _start_export_job(project_id: str) -> str:
             rendered_path = r["rendered_path"] if r["rendered_path"] else None
             frame_type = r["frame_type"] if "frame_type" in r.keys() else "dm"
 
+            # ── Final empty-slide guard ───────────────────────────────────
+            # A DM slide with no chat bubble (no text) AND no story image is
+            # a blank screen — it must NEVER appear in the video. This is the
+            # last line of defence: it also covers the regenerate path, which
+            # rebuilds straight from stored slides without the pipeline's
+            # autoclean step. Meme / app_ad slides are image/video based and
+            # are always kept.
+            if frame_type == "dm":
+                db_empty = await get_db()
+                try:
+                    chk = await (await db_empty.execute(
+                        """SELECT
+                             SUM(CASE WHEN trim(COALESCE(text,'')) != '' THEN 1 ELSE 0 END) AS n_text,
+                             SUM(CASE WHEN COALESCE(story_image_path,'') != '' THEN 1 ELSE 0 END) AS n_story
+                           FROM messages WHERE slide_id=?""",
+                        (r["id"],),
+                    )).fetchone()
+                finally:
+                    await db_empty.close()
+                n_text = (chk["n_text"] if chk else 0) or 0
+                n_story = (chk["n_story"] if chk else 0) or 0
+                if n_text == 0 and n_story == 0:
+                    print(f"[export] {project_id}: leeg screen {r['id'][:8]} overgeslagen")
+                    continue
+
             if rendered_path and Path(rendered_path).exists():
                 # Already rendered — use as-is
                 out_path = rendered_path
@@ -355,6 +380,9 @@ async def _start_export_job(project_id: str) -> str:
                 "hold_duration_ms": r["hold_duration_ms"],
                 "is_video":         frame_type in ("meme", "app_ad") and Path(out_path).suffix.lower() in {".mp4", ".mov", ".avi", ".webm"},
             })
+
+        if not slides:
+            raise ValueError("Geen bruikbare slides na filteren van lege screens")
 
         output_path = PROJECTS_DIR / project_id / "output.mp4"
 
