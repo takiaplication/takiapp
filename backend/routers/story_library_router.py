@@ -29,13 +29,16 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
-from config import STORY_LIBRARY_DIR, MUSIC_LIBRARY_DIR, PROJECTS_DIR
+from config import (
+    STORY_LIBRARY_DIR, MUSIC_LIBRARY_DIR, APP_INTRO_LIBRARY_DIR, PROJECTS_DIR,
+)
 from database import get_db
 
 router = APIRouter(tags=["story-library"])
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 _AUDIO_EXTS = {".mp3", ".m4a", ".wav", ".aac", ".ogg"}
+_VIDEO_EXTS = {".mp4", ".mov", ".webm", ".m4v"}
 
 
 # ── Story photos ─────────────────────────────────────────────────────────────
@@ -201,4 +204,64 @@ def pick_random_music() -> Optional[str]:
     """Random track path for exports without explicit background music."""
     import random
     files = _music_files()
+    return str(random.choice(files)) if files else None
+
+
+# ── App-intro clips (screen recording of opening the Taki app) ───────────────
+# Reusable pool of short videos inserted right BEFORE every app-promo (app_ad)
+# slide, so each promo is preceded by "me opening the app on my phone".
+
+def _app_intro_files() -> list[Path]:
+    if not APP_INTRO_LIBRARY_DIR.exists():
+        return []
+    return sorted(
+        (f for f in APP_INTRO_LIBRARY_DIR.iterdir()
+         if f.is_file() and f.suffix.lower() in _VIDEO_EXTS),
+        key=lambda p: p.name.lower(),
+    )
+
+
+@router.get("/app-intro-library")
+async def list_app_intros():
+    files = _app_intro_files()
+    return {
+        "count": len(files),
+        "items": [
+            {"filename": f.name, "url": f"/files/app_intro_library/{f.name}"}
+            for f in files
+        ],
+    }
+
+
+@router.post("/app-intro-library/upload")
+async def upload_app_intro(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _VIDEO_EXTS:
+        raise HTTPException(
+            400, f"Unsupported file type '{suffix}'. Allowed: {sorted(_VIDEO_EXTS)}"
+        )
+    dest = APP_INTRO_LIBRARY_DIR / (file.filename or f"intro{suffix}")
+    if dest.exists():
+        dest = APP_INTRO_LIBRARY_DIR / f"{uuid.uuid4().hex[:8]}_{file.filename}"
+    dest.write_bytes(await file.read())
+    return {"filename": dest.name, "url": f"/files/app_intro_library/{dest.name}"}
+
+
+@router.delete("/app-intro-library/{filename}")
+async def delete_app_intro(filename: str):
+    target = (APP_INTRO_LIBRARY_DIR / filename).resolve()
+    if APP_INTRO_LIBRARY_DIR.resolve() not in target.parents:
+        raise HTTPException(400, "Invalid filename")
+    if not target.exists():
+        raise HTTPException(404, f"'{filename}' not found in app-intro library")
+    if target.suffix.lower() not in _VIDEO_EXTS:
+        raise HTTPException(400, "File type not allowed")
+    target.unlink()
+    return {"ok": True, "deleted": filename}
+
+
+def pick_app_intro() -> Optional[str]:
+    """Random app-intro clip path, or None when the pool is empty."""
+    import random
+    files = _app_intro_files()
     return str(random.choice(files)) if files else None

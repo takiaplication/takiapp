@@ -186,6 +186,77 @@ async def autoclean_empty_dm_slides(project_id: str) -> int:
         await db.close()
 
 
+async def insert_app_intro_clips(project_id: str) -> int:
+    """
+    Insert a short "opening the app" screen-recording clip right BEFORE every
+    app-promo (app_ad) slide. The clip is a reusable video from the app-intro
+    library; it's added as a meme-type video slide (the compositor already
+    knows how to play video meme slides).
+
+    Idempotent: if the slide immediately before an app_ad is already an
+    app_intro clip, that slot is skipped — safe to call on re-runs and it
+    won't double-insert.
+
+    Returns the number of intro clips inserted.
+    """
+    import uuid as _uuid
+    from routers.story_library_router import pick_app_intro  # noqa: PLC0415
+
+    clip = pick_app_intro()
+    if not clip:
+        return 0  # empty pool → nothing to insert
+
+    db = await get_db()
+    try:
+        slides = await (await db.execute(
+            """SELECT id, sort_order, frame_type, meme_category
+               FROM slides WHERE project_id=? AND is_active=1
+               ORDER BY sort_order""",
+            (project_id,),
+        )).fetchall()
+
+        def _ft(s):
+            return (s["frame_type"] if "frame_type" in s.keys() else None) or "dm"
+
+        def _cat(s):
+            return s["meme_category"] if "meme_category" in s.keys() else None
+
+        # Build the new ordering: an 'intro' marker before each app_ad slide,
+        # unless the preceding slide is already an app_intro.
+        plan: list = []
+        inserted = 0
+        prev_is_intro = False
+        for s in slides:
+            if _ft(s) == "app_ad" and not prev_is_intro:
+                plan.append(("intro", None))
+                inserted += 1
+            plan.append(("existing", s["id"]))
+            prev_is_intro = (_cat(s) == "app_intro")
+
+        if inserted == 0:
+            return 0
+
+        # Rewrite sort_orders sequentially and insert the new intro slides.
+        for idx, (kind, sid) in enumerate(plan):
+            if kind == "existing":
+                await db.execute(
+                    "UPDATE slides SET sort_order=? WHERE id=?", (idx, sid)
+                )
+            else:  # intro
+                await db.execute(
+                    """INSERT INTO slides
+                       (id, project_id, sort_order, slide_type, frame_type,
+                        source_frame_path, meme_source_path, meme_category,
+                        is_active, hold_duration_ms)
+                       VALUES (?, ?, ?, 'meme', 'meme', ?, ?, 'app_intro', 1, 3000)""",
+                    (str(_uuid.uuid4()), project_id, idx, clip, clip),
+                )
+        await db.commit()
+        return inserted
+    finally:
+        await db.close()
+
+
 # ── Full pipeline for one project ─────────────────────────────────────────────
 
 async def _run_pipeline(project_id: str) -> None:
@@ -285,6 +356,14 @@ async def _run_pipeline(project_id: str) -> None:
             await claim_story_photo(project_id)
     except Exception as story_err:
         print(f"[story] claim failed for {project_id}: {story_err}")
+
+    # ── App-intro clip vóór elke app-promo slide ──────────────────────────
+    try:
+        n_intro = await insert_app_intro_clips(project_id)
+        if n_intro:
+            print(f"[app-intro] {project_id}: {n_intro} intro-clip(s) ingevoegd")
+    except Exception as intro_err:
+        print(f"[app-intro] {project_id}: mislukt: {intro_err}")
 
     # ── Done — move to Review (or straight to export with AUTO_APPROVE=1) ──
     import os  # noqa: PLC0415

@@ -274,6 +274,22 @@ export async function getMusicLibrary(): Promise<AssetList> {
   return res.data
 }
 
+export async function getAppIntroLibrary(): Promise<AssetList> {
+  const res = await api.get('/app-intro-library')
+  return res.data
+}
+
+export async function uploadAppIntro(file: File): Promise<AssetItem> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post('/app-intro-library/upload', form)
+  return res.data
+}
+
+export async function deleteAppIntro(filename: string): Promise<void> {
+  await api.delete(`/app-intro-library/${encodeURIComponent(filename)}`)
+}
+
 export async function uploadMusicTrack(file: File): Promise<AssetItem> {
   const form = new FormData()
   form.append('file', file)

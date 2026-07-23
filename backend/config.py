@@ -15,9 +15,11 @@ PROJECTS_DIR = STORAGE_DIR / "projects"
 MEME_LIBRARY_DIR = STORAGE_DIR / "meme_library"   # shared Dutch meme library
 STORY_LIBRARY_DIR = STORAGE_DIR / "story_library"  # single-use story photos
 MUSIC_LIBRARY_DIR = STORAGE_DIR / "music_library"  # reusable background tracks
+APP_INTRO_LIBRARY_DIR = STORAGE_DIR / "app_intro_library"  # reusable app-opening clips
 DATABASE_PATH = STORAGE_DIR / "reelfactory.db"
 
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 MEME_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
 STORY_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
 MUSIC_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+APP_INTRO_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)

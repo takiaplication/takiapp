@@ -6,6 +6,9 @@ import {
   getMusicLibrary,
   uploadMusicTrack,
   deleteMusicTrack,
+  getAppIntroLibrary,
+  uploadAppIntro,
+  deleteAppIntro,
 } from '../api/projects'
 import type { AssetItem } from '../api/projects'
 import { API_BASE } from '../api/config'
@@ -13,13 +16,16 @@ import { API_BASE } from '../api/config'
 export default function AssetsPage() {
   const [storyItems, setStoryItems] = useState<AssetItem[]>([])
   const [musicItems, setMusicItems] = useState<AssetItem[]>([])
+  const [introItems, setIntroItems] = useState<AssetItem[]>([])
   const [busy, setBusy] = useState(false)
   const storyInput = useRef<HTMLInputElement>(null)
   const musicInput = useRef<HTMLInputElement>(null)
+  const introInput = useRef<HTMLInputElement>(null)
 
   const reload = () => {
     getStoryLibrary().then((r) => setStoryItems(r.items)).catch(() => {})
     getMusicLibrary().then((r) => setMusicItems(r.items)).catch(() => {})
+    getAppIntroLibrary().then((r) => setIntroItems(r.items)).catch(() => {})
   }
 
   useEffect(reload, [])
@@ -157,6 +163,62 @@ export default function AssetsPage() {
           {musicItems.length === 0 && (
             <div className="text-zinc-600 text-sm py-6 text-center border border-dashed border-zinc-800 rounded-lg">
               Geen tracks — video's worden zonder muziek geëxporteerd
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── App-intro clips ──────────────────────────────────────────── */}
+      <section>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-2xl font-bold text-white">📱 App-intro clips</h2>
+          <button
+            onClick={() => introInput.current?.click()}
+            disabled={busy}
+            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-50"
+          >
+            + Clips toevoegen
+          </button>
+          <input
+            ref={introInput}
+            type="file"
+            accept=".mp4,.mov,.webm,.m4v"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              handleUpload(e.target.files, uploadAppIntro)
+              e.target.value = ''
+            }}
+          />
+        </div>
+        <p className="text-sm text-zinc-400 mb-4">
+          Korte schermopname van jou die de app opent op je gsm. Deze wordt
+          automatisch <b>vlak vóór elke app-promo slide</b> in de video geplaatst.
+          Herbruikbaar — bij meerdere clips wordt er willekeurig één gekozen.
+        </p>
+
+        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-6 gap-3">
+          {introItems.map((it) => (
+            <div key={it.filename} className="relative group rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800">
+              <video
+                src={`${API_BASE}${it.url}`}
+                className="w-full aspect-[9/16] object-cover"
+                muted
+                playsInline
+                preload="metadata"
+              />
+              <button
+                onClick={() => deleteAppIntro(it.filename).then(reload)}
+                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+                title="Verwijderen"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {introItems.length === 0 && (
+            <div className="col-span-full text-zinc-600 text-sm py-8 text-center border border-dashed border-zinc-800 rounded-lg">
+              Geen clips — app-promo slides worden zonder intro getoond
             </div>
           )}
         </div>
